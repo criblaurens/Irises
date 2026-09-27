@@ -99,3 +99,18 @@ test('the early-emit reading counts a verdict still out as flagged, so a turn th
   setReachJudgeForTests(() => 'reach');
   assert.equal(reachFlagged('a plain question'), true);
 });
+
+test('the judge reads their own words, the structural screen the whole turn', async () => {
+  const { reachFlagged, turnNeedsReach } = await import('./reachClassify.js');
+  const asked: string[] = [];
+  setReachJudgeForTests(t => { asked.push(t); return 'none'; });
+  // A tapped reply: the tag is app metadata, so the verdict the door warmed on the typed words holds.
+  assert.equal(reachFlagged('[replying to "see you at 8"] lol ok', 'lol ok'), false);
+  assert.deepEqual(await turnNeedsReach({ chatId: 'c' }, '[replying to "see you at 8"] lol ok', 'lol ok'), { needs: false, reach: 'none' });
+  assert.deepEqual(asked, ['lol ok', 'lol ok']);
+  // …while a link that rides in the quoted message still counts, with no call at all.
+  assert.deepEqual(await turnNeedsReach({ chatId: 'c' }, '[replying to "https://example.com/a"] whats this', 'whats this'), { needs: true, reach: 'structural' });
+  // A caption-less media turn has no words of its own: that is no reach verdict, and nothing pending.
+  setReachJudgeForTests(null);
+  assert.equal(peekReachVerdict(''), 'failed');
+});

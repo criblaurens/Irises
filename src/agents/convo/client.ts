@@ -852,16 +852,18 @@ export async function chat(
   // (no freshness read: that can only stand the gate down, never make it fire), the chat and turn
   // shape, and the parked-approval read started beside the memory batch. Nothing new is awaited in
   // front of the call but that read, which has long since landed. A caller with no sink never arms.
-  // Warm the reach judge on THIS text (a no-op when the door already did): a voice-memo transcript
-  // or a remerged burst is a different string from the one the door saw, and the gate below needs
-  // its verdict by the time the Convo call returns.
-  warmReachClassify({ chatId, handle }, textToSend);
+  // Warm the reach judge on their own words (a no-op when the door already did): a voice-memo
+  // transcript or a remerged burst is a different string from the one the door saw, and the gate
+  // below needs its verdict by the time the Convo call returns. `typedText`, never `textToSend`: the
+  // tapped-reply tag and the attachment note are app metadata, and keying on them would miss the
+  // door's reading and cost every tapped reply its early bubble.
+  warmReachClassify({ chatId, handle }, typedText);
   const earlySend = chatContext?.earlySend;
   const early = earlySend && streamArmed({
     enabled: streamOn,
     hasParkedApproval: await parkedRead,
     hookMode: hookDirective?.mode,
-    groundingFlagged: reachFlagged(textToSend),
+    groundingFlagged: reachFlagged(textToSend, typedText),
     isGroupChat,
     introOrFirstMove: !!introWeave,
     isBurst: (chatContext?.burstManifest?.length ?? 1) > 1,
@@ -931,7 +933,7 @@ export async function chat(
     }
     const onScreen = early?.sent ?? [];
     const result = await processConvoResult({
-      res, chatId, handle, chatContext, textToSend, history, media,
+      res, chatId, handle, chatContext, textToSend, typedText, history, media,
       // A pass that replaces the draft after part of it went out is told what is on their screen:
       // every such pass calls through `turn.call`, so it is wrapped here, once.
       turn: {

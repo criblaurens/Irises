@@ -122,6 +122,7 @@ export function warmReachClassify(ctx: ReachCtx, text: string): void {
 export function peekReachVerdict(text: string): ReachVerdict | undefined {
   if (override) return override(text);
   const key = reachCacheKey(text);
+  if (!key) return 'failed';
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
   if (inflight.has(key)) return undefined;
@@ -142,20 +143,21 @@ export async function readReachVerdict(ctx: ReachCtx, text: string): Promise<Rea
 }
 
 /** Where the turn's verdict came from: the structural screen (a link, a path), or the judge. */
-export type ReachSource = 'structural' | ReachVerdict | 'pending';
+export type ReachSource = 'structural' | ReachVerdict;
 
-/** The gate's one question: does THIS turn need reach she lacks? Structure answers without a call;
- *  otherwise only a confident `reach` from the judge says yes. Never throws. */
-export async function turnNeedsReach(ctx: ReachCtx, text: string): Promise<{ needs: boolean; reach: ReachSource }> {
+/** The gate's one question: does THIS turn need reach she lacks? Structure answers without a call,
+ *  read on the full turn text (a link inside a tapped-reply quote still counts); the judge reads the
+ *  person's own words (`judgeText`), the same string the door warmed. Never throws. */
+export async function turnNeedsReach(ctx: ReachCtx, text: string, judgeText: string = text): Promise<{ needs: boolean; reach: ReachSource }> {
   if (needsGrounding(text) === 'yes') return { needs: true, reach: 'structural' };
-  const verdict = await readReachVerdict(ctx, text);
+  const verdict = await readReachVerdict(ctx, judgeText);
   return { needs: verdict === 'reach', reach: verdict };
 }
 
 /** The early-emit pre-check's reading of the same verdict, without waiting: a verdict still out
  *  counts as flagged, so a turn the gate might yet force never streams its draft early. */
-export function reachFlagged(text: string): boolean {
+export function reachFlagged(text: string, judgeText: string = text): boolean {
   if (needsGrounding(text) === 'yes') return true;
-  const verdict = peekReachVerdict(text);
+  const verdict = peekReachVerdict(judgeText);
   return verdict === undefined || verdict === 'reach';
 }

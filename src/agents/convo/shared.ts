@@ -3682,6 +3682,9 @@ export async function processConvoResult(args: {
   handle: string | undefined;
   chatContext: ChatContext | undefined;
   textToSend: string;
+  /** Their own words, before the tapped-reply tag and attachment note are folded in — what the reach
+   *  judge reads (convo/reachClassify.ts). Omitted: the judge reads `textToSend`. */
+  typedText?: string;
   history: StoredMessage[];
   media: IncomingMedia;
   // The first call's system/messages/tools, so a recall_memory call can run its one bounded
@@ -4469,7 +4472,7 @@ export async function processConvoResult(args: {
     // Does this turn need reach she lacks? A link or a path says so outright; otherwise the reach
     // judge decides (convo/reachClassify.ts), warmed at the door so its verdict is already here.
     // Anything short of a confident `reach` is her call, and the gate stands down.
-    const reach = await turnNeedsReach({ chatId, handle }, lastUser);
+    const reach = await turnNeedsReach({ chatId, handle }, lastUser, args.typedText ?? lastUser);
     if (!reach.needs) {
       decision = 'not_needed';
     } else if (alreadyRunning || isDuplicateDelegation(chatId, 'general', lastUser) === 'in_flight') {
