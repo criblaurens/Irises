@@ -305,9 +305,13 @@ import type { StoredMessage, UserProfile } from '../../db/types.js';
  * Then **+147**, the brightest self (190,717 → 190,864), policy.ts alone: someone she barely
  * knows sees her brightest self, a mask worn on purpose, and asked why she is like that she says her
  * creator made her cheerful with someone new.
+ *
+ * Then **+1,169**, opinions and caps (190,864 → 192,033), policy.ts alone: she has an opinion on
+ * everything they do and on plenty of replies it comes out as what they should do; and caps shout a
+ * big feeling, with truly heavy news getting none.
  */
-const CORPUS_CHARS = 190_864;
-const CORPUS_SHA256 = '2358b31948c07124d761ce7e6a54a90423e60eac9a477fe564cd82efa6fe3352';
+const CORPUS_CHARS = 192_033;
+const CORPUS_SHA256 = '21512b493f07b344a29ef9b00abca3006b3a03ddc1344200a5420387059e2764';
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 

@@ -30,10 +30,11 @@ import {
   HOOK_CLAMP, HOOK_HEADING, HOOK_LEAD, HOOK_OPEN_LINE, HOOK_NONE_OPEN, HOOK_LATE_LINE,
   MOMENTS_LEAD, QUIET_HEADING, QUIET_LAW,
   SHARE_HEADING, SHARE_LEAD, SHARE_OPEN_LINE, SHARE_QUESTION_LINE, SHARE_NONE_OPEN, SHARE_LATE_LINE,
-  LOOSE_LEVEL_LINES,
+  LOOSE_LEVEL_LINES, PUSH_LINE, PUSH_PERCENT,
   type HookAffectInput, type HookDirective, type HookKind, type HookState, type HookWord,
   type TurnKind,
 } from './hooks.js';
+import { renderDriftAnchor, PUSH_BULLET } from './policy.js';
 
 const T0 = Date.UTC(2026, 3, 1);
 
@@ -927,4 +928,29 @@ test('selectHook and recordHook are pure: frozen inputs survive, same in same ou
   assert.deepEqual(next.lastKinds, ['judgment', 'judgment', 'callback']);
   assert.deepEqual(before.lastKinds, ['none', 'judgment', 'judgment'], 'the input was not touched');
   assert.equal(before.idleSinceMoment, 9);
+});
+
+// ══ 10. Push turns ═══════════════════════════════════════════════════════════
+
+test('a push turn: PUSH_PERCENT of turns carry it, never in a room, on a heavy share, a slip, or a task', () => {
+  // A hundred consecutive seconds visit every residue of the draw once.
+  const nows = Array.from({ length: 100 }, (_, i) => T0 + i * 1000);
+  const at = (n: number, over: { shape?: TurnKind; affect?: HookAffectInput; isGroup?: boolean } = {}) =>
+    selectHook(state(), over.shape ?? 'idle', 'fast_path', over.affect ?? OPEN, over.isGroup ?? false, n);
+  const pushed = nows.filter(n => at(n).directive.push);
+  assert.equal(pushed.length, PUSH_PERCENT);
+  const n = pushed[0];
+  assert.equal(at(n).report.push, true, 'the receipt says so');
+  assert.equal(at(n, { shape: 'share' }).directive.push, true);
+  assert.equal(at(n, { shape: 'share', affect: { ...OPEN, heavy: true } }).directive.push, undefined, 'weight gets company');
+  assert.equal(at(n, { isGroup: true }).directive.push, undefined, 'never in a room');
+  assert.equal(at(n, { affect: { ...OPEN, slip: 'tired' } }).directive.push, undefined, 'a slip already has the move');
+  assert.equal(at(n, { shape: 'task' }).directive.push, undefined);
+
+  assert.ok(renderHooksSection(at(n).directive).includes(PUSH_LINE));
+  assert.ok(!renderHooksSection(at(nows.find(x => !pushed.includes(x))!).directive).includes(PUSH_LINE));
+  assert.ok(renderDriftAnchor('hook', 0, undefined, true).endsWith(PUSH_BULLET));
+  assert.ok(renderDriftAnchor('share', 0, undefined, true).endsWith(PUSH_BULLET));
+  assert.ok(!renderDriftAnchor('quiet', 0, undefined, true).includes(PUSH_BULLET));
+  assert.ok(!renderDriftAnchor('task', 0, undefined, true).includes(PUSH_BULLET));
 });

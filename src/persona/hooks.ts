@@ -242,6 +242,9 @@ export interface HookDirective {
   /** The extreme feeling of hers that slips into this reply, stated at the recency edge
    *  (persona/policy.ts renderDriftAnchor). Never on a quiet turn. */
   slip?: string;
+  /** One of the turns her opinion on what they should do comes out as the move (PUSH_PERCENT of the
+   *  hook and share turns that have a move open). Stated in the section and at the recency edge. */
+  push?: true;
 }
 
 /**
@@ -296,6 +299,7 @@ export interface HookSelectReport {
   idleLayer: string;
   forbidden: HookWord[];
   lastKinds: HookKind[];
+  push?: true;
 }
 
 /**
@@ -362,6 +366,17 @@ function repeatedTailKind(lastKinds: readonly HookKind[]): HookWord | null {
  * shape was built to refuse, so the flat-mood floor narrows a share turn to presence instead of
  * closing it, and the turn still has to say one plain thing about their thing.
  */
+/** Of the hook and share turns with a move open, the share on which the move is her telling them what
+ *  to do. She has an opinion on everything they do; a friend who voiced it on every text would be a
+ *  nag, and one who never did would have none. */
+export const PUSH_PERCENT = 35;
+
+/** A stable per-turn draw in [0, 100) off the turn's clock, pure, so a test that fixes `now` fixes it. */
+function pushDraw(now: number): number {
+  const n = Number.isFinite(now) ? Math.floor(Math.abs(now) / 1000) : 0;
+  return ((n % 1_000_003) * 7919) % 100;
+}
+
 export function selectHook(
   state: HookState,
   shape: TurnKind,
@@ -371,7 +386,10 @@ export function selectHook(
   now: number,
   take = false,
 ): { directive: HookDirective; report: HookSelectReport } {
-  void now;
+  // Never in a room (advice aimed at one person in front of everyone) and never on a slip turn, whose
+  // one move is already spoken for. The branches below add their own: a share that is heavy gets
+  // company, and a turn with no move open has nothing to land it as.
+  const pushDrawn = !isGroup && !affect.slip && pushDraw(now) < PUSH_PERCENT;
   // Sliced here as well as on the way into the store: the selector must give the same answer for a
   // hand-built state as for a stored one, and a longer window would be a kill switch with a longer
   // memory than the ledger it is documented to read.
@@ -429,6 +447,7 @@ export function selectHook(
     // else lost to the share law in every live replay.
     const slipTurn = !!affect.slip && !forbidden.includes('tangent');
     const shareForbidden = slipTurn ? HOOK_WORDS.filter(w => w !== 'tangent') : forbidden;
+    const sharePush = pushDrawn && !affect.heavy && shareForbidden.length < HOOK_WORDS.length;
 
     return {
       directive: {
@@ -448,8 +467,9 @@ export function selectHook(
         englishLooseness: affect.englishLooseness as 0 | 1 | 2 | 3 | undefined,
         ...(affect.low ? { low: true } : {}),
         ...(affect.slip ? { slip: affect.slip } : {}),
+        ...(sharePush ? { push: true as const } : {}),
       },
-      report: report('share', shareForbidden),
+      report: { ...report('share', shareForbidden), ...(sharePush ? { push: true as const } : {}) },
     };
   }
 
@@ -499,6 +519,7 @@ export function selectHook(
     || (w === 'judgment' && (affect.stranger || lastKinds[lastKinds.length - 1] === 'judgment')));
   // The slip takes the one hook the same way it takes a share's move (see the share branch).
   const hookForbidden = affect.slip && !forbidden.includes('tangent') ? HOOK_WORDS.filter(w => w !== 'tangent') : forbidden;
+  const hookPush = pushDrawn && hookForbidden.length < HOOK_WORDS.length;
 
   return {
     directive: {
@@ -515,8 +536,9 @@ export function selectHook(
       englishLooseness: affect.englishLooseness as 0 | 1 | 2 | 3 | undefined,
       ...(affect.low ? { low: true } : {}),
       ...(affect.slip ? { slip: affect.slip } : {}),
+      ...(hookPush ? { push: true as const } : {}),
     },
-    report: report('hook', hookForbidden),
+    report: { ...report('hook', hookForbidden), ...(hookPush ? { push: true as const } : {}) },
   };
 }
 
@@ -640,8 +662,8 @@ const PLAY_LEVEL_LINES: Record<0 | 1 | 2 | 3, string> = {
 export const LOOSE_LEVEL_LINES: Record<0 | 1 | 2 | 3, string> = {
   0: 'English careful this turn. Slips near zero, no typos, no elongation. Any bubble with a number, date, price or bad news stays at this level even when the rest is looser.',
   1: '',
-  2: 'English loose this turn. Two slips per bubble, occasional typo left in, stretched words often, longer when funny or annoyed.',
-  3: 'English messy this turn. Slips everywhere, subjects drop, typos stay uncorrected, letters stretch, punctuation mostly gone.',
+  2: 'English loose this turn. Two slips per bubble, occasional typo left in, stretched words often, longer when funny or annoyed. A big feeling gets caps on the word it sits on.',
+  3: 'English messy this turn. Slips everywhere, subjects drop, typos stay uncorrected, letters stretch, punctuation mostly gone. Big feelings come out in caps, a word, a phrase or the whole bubble.',
 };
 
 export const QUIET_HEADING = '## This turn is quiet (INTERNAL)';
@@ -699,6 +721,10 @@ export const TAKE_LATE_LINE = 'It is late where they are: the same take, smaller
 /** On a slip turn whose one move is a tangent: the tangent is her. `{feeling}` is the moodlet. */
 export const SLIP_TANGENT_LINE = 'This turn the tangent is you: how {feeling} you are today, a few plain words, hooked onto what they sent.';
 
+/** On a push turn, under the line that named the kinds: whichever it is, it lands as what they
+ *  should do. The recency edge carries the same turn as a bubble (persona/policy.ts PUSH_BULLET). */
+export const PUSH_LINE = 'This turn, whichever kind you take, it tells them what to do: your opinion on their next step, said straight.';
+
 export const LOW_LINE = 'You are low right now. Whatever you ask, ask it lazy: a few words, no effort spent dressing it up, and it still keeps its question mark.';
 
 export const SHARE_LATE_LINE ='It is late where they are: one short bubble and nothing heavy. Same move, lower volume.';
@@ -748,6 +774,7 @@ export function renderHooksSection(directive: HookDirective, momentLines: string
     if (directive.mode === 'share') {
       lines.push(SHARE_HEADING, SHARE_LEAD);
       lines.push(allowed.length > 0 ? SHARE_OPEN_LINE.replace('{kinds}', nameKinds(allowed)) : SHARE_NONE_OPEN);
+      if (directive.push && allowed.length > 0) lines.push(PUSH_LINE);
       if (directive.slip && allowed.length === 1 && allowed[0] === 'tangent') lines.push(SLIP_TANGENT_LINE.replace('{feeling}', directive.slip));
       // Under the sentence that named it, and only when it is actually hers this turn: the line is
       // what a follow-up IS, and it has nothing to say on a turn where the kind is closed.
@@ -758,6 +785,7 @@ export function renderHooksSection(directive: HookDirective, momentLines: string
     } else {
       lines.push(HOOK_HEADING, HOOK_LEAD);
       lines.push(allowed.length > 0 ? HOOK_OPEN_LINE.replace('{kinds}', nameKinds(allowed)) : HOOK_NONE_OPEN);
+      if (directive.push && allowed.length > 0) lines.push(PUSH_LINE);
       if (directive.slip && allowed.length === 1 && allowed[0] === 'tangent') lines.push(SLIP_TANGENT_LINE.replace('{feeling}', directive.slip));
       if (directive.lateNight) lines.push(HOOK_LATE_LINE);
       const moments = directive.moments ? momentLines.map(l => l.trim()).filter(Boolean) : [];
