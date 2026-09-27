@@ -114,8 +114,8 @@ export function selfEnabled(): boolean {
  * Gates the sweep that lets her text first because something is on HER mind (memory/musings.ts):
  * a seed from SELF.md, a moment she keeps, or a theme of theirs, voiced by the proactive pipeline as
  * a `musing`. Its own line, apart from anything the user set up: no reminder, no cron job, no
- * watched mail rides it. It diverges from THREADING_PINGS_ENABLED (default off) on purpose, because
- * the owner asked for her to start conversations; the bounds live in the sweep (one a day at most,
+ * watched mail rides it. On by default because the owner asked for her to start conversations
+ * (scripts/configure.sh --musings off turns it off); the bounds live in the sweep (one a day at most,
  * daytime where they are, never on a quiet thread they left, never a room).
  */
 export function musingsEnabled(): boolean {

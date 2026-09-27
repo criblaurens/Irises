@@ -17,11 +17,8 @@
 // lenient-load / best-effort-save discipline: a missing or mangled file reads as "never ran" (one
 // duplicate introduction is the worst it can cost), and a failed write never takes a boot down.
 //
-// WHY THIS DEFAULTS ON, unlike THREADING_PINGS_ENABLED. That flag guards a recurring, unprompted
-// question that arrives forever, on a schedule nobody asked for — an install that upgraded INTO it
-// would find Irises texting its user out of the blue, so it must be opted into. This is exactly ONE
-// message, minutes after an operator deliberately ran an installer, addressed to the one person that
-// installer was run for. The install IS the consent, and a feature shipped dark here is the feature
+// WHY THIS DEFAULTS ON. This is exactly ONE message, minutes after an operator deliberately ran an
+// installer, addressed to the one person that installer was run for. The install IS the consent, and a feature shipped dark here is the feature
 // not existing. The off switch stays for the silent install (a deployment handed over before the
 // person on the far end knows anything is coming).
 //
@@ -146,7 +143,7 @@ export const INTRO_WEAVE_BLOCK = `## First move was theirs (this turn only)\nThe
 
 /**
  * The feature gate (env: FIRST_MOVE_ENABLED). DEFAULT ON — `''`/unset is on, the house shape shared
- * with threadingEnabled and relationshipClimateEnabled rather than threadingPingsEnabled's opt-in.
+ * with threadingEnabled and relationshipClimateEnabled.
  * The justification is in the module header; the short version is that this is one message following
  * one deliberate install, not a standing licence to text. Read at CALL time like its siblings, so an
  * operator turning it off needs no restart — and so a sweep already armed simply stops finding work.

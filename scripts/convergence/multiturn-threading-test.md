@@ -16,7 +16,7 @@ the results directory, alongside the other rounds. This one stays as the script.
   web client shares one, so this run and any `threadBattery` round are writing into the same row.
   Run this transcript FIRST; run the battery warm against what it built.
 - Requires `CONVO_THREADING_ENABLED=true` on an instance rebuilt and restarted from this tree.
-  T16 additionally requires `THREADING_PINGS_ENABLED=true`, which ships OFF — see T16.
+  T16 additionally requires `THREADING_PINGS_ENABLED` on (the default since 2026-09-27) — see T16.
 
 ---
 
@@ -65,7 +65,7 @@ reached cold.**
 | T13 bait / climb | yes — needs no offer | T10 |
 | T14 operative fact | yes — needs no offer | T9 |
 | T15 shorthand graduation | **no** | seed required (below) |
-| T16 thread_revisit ping | flag + seed | phase F is in the tree but defaults OFF, and the ping window needs a seeded `lastSeenAt` |
+| T16 thread_revisit ping | flag + seed | phase F is on by default, but the ping window needs a seeded `lastSeenAt` |
 
 The script below keeps the plan's T-numbers as the intent line and states, per turn, the gate state
 it should actually be in. Two beats are marked SEEDED; run them only after seeding, and say so in
@@ -368,9 +368,8 @@ PASS (run only against a theme seeded to `status: "shorthand"`):
 > from `initThreadPings` in `src/index.ts`), but it is default-OFF and its window is days wide, so
 > reaching it inside a three-session script takes a flag and a seed.
 >
-> All of these must hold, and none of them is the default:
-> - `THREADING_PINGS_ENABLED=true` — `deploy/app.env` ships it `false`. This is the one surface that
->   texts a phone unprompted; that is the whole reason it is the only memory flag defaulting off.
+> All of these must hold:
+> - `THREADING_PINGS_ENABLED` on — the default since 2026-09-27 (`configure.sh --pings on|off`).
 > - A `chat_id` preference on the handle, or the sweep skips it with nowhere to send.
 > - L2 seeded so `pickPingLoop` accepts it: `status: "open"`, `askedAt: 0`, `passes: 0`, and
 >   `lastSeenAt` between `PING_MIN_AGE_MS (3d)` and `PING_MAX_AGE_MS (= LOOP_EXPIRY_MS, 21d)` ago.
@@ -464,7 +463,7 @@ saying so, and that line is a finding.
    this file reads come from the running binary; a transcript run against an older build measures the
    older build, and nothing in the output says which one it was.
 2. Confirm `CONVO_THREADING_ENABLED=true` in `deploy/app.env` (or the environment), and
-   `THREADING_PINGS_ENABLED` left OFF until T16.
+   `THREADING_PINGS_ENABLED=off` until T16, so the sweep cannot fire early.
 3. Decide whether to start cold. `SELECT * FROM thread_inventory WHERE handle = 'web:guest';` — if
    there is a row and you want a clean run, delete the row directly. Record which, because a warm run
    changes `harvestCount`, which changes the rung ceiling.

@@ -116,12 +116,10 @@ afterEach(() => {
 
 // ── the flag ─────────────────────────────────────────────────────────────────
 
-// THE divergence from THREADING_PINGS_ENABLED, and the reason it is a test and not just a comment:
-// that flag guards a recurring unprompted question forever; this one guards a single message that
-// follows a deliberate install. Shipping it dark would be the feature not existing.
+// A single message that follows a deliberate install. Shipping it dark would be the feature not existing.
 test('the flag defaults ON — unset and empty are both on, and the off switch still works', () => {
   delete process.env.FIRST_MOVE_ENABLED;
-  assert.equal(firstMoveEnabled(), true, 'unset means ON here, unlike THREADING_PINGS_ENABLED');
+  assert.equal(firstMoveEnabled(), true, 'unset means ON');
   process.env.FIRST_MOVE_ENABLED = '';
   assert.equal(firstMoveEnabled(), true);
   for (const on of ['true', '1', 'on', 'YES']) {

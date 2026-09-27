@@ -6,10 +6,9 @@
 // with nobody having asked how it went, and texts a phone about it.
 //
 // That difference is the whole reason for the shape below:
-//   • DEFAULT OFF (see threadingPingsEnabled). Every other memory flag in the engine defaults ON,
-//     because every other memory flag only decides how something she was ALREADY going to say gets
-//     coloured. This one decides whether a phone buzzes at someone who did not write to her. That is
-//     the one surface an install has to opt INTO, not out of.
+//   • DEFAULT ON (see threadingPingsEnabled), the owner's call: she should start conversations, the
+//     same as musings. It is still the flag that decides whether a phone buzzes at someone who did not
+//     write to her, so the bounds below are hard code, and the off switch is one Configure flag.
 //   • BILL FIRST, THEN DELIVER. The weekly budget is spent before the send is attempted, so a
 //     delivery that fails still costs the week. That is the cheap side of the trade: the expensive
 //     side would be a failure that leaves the budget unspent, an hourly sweep that finds the same
@@ -37,15 +36,13 @@ const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
 /**
- * The feature gate (env: THREADING_PINGS_ENABLED). DEFAULT OFF — the deliberate divergence from the
- * house style, where `''` means ON (threadingEnabled, relationshipClimateEnabled, noteGroomEnabled).
- * Those guard INTERNAL colouring: with them on, the worst case is a callback inside a reply the user
- * was already getting. This one sends a message nobody asked for, and an install that upgraded into
- * it without choosing it would have Irises texting its user out of the blue. Read at call time like
- * its siblings, so flipping it needs no restart.
+ * The feature gate (env: THREADING_PINGS_ENABLED). DEFAULT ON, the house shape: `''` means on, and
+ * only an explicit off value turns it off (`bash scripts/configure.sh --pings off`). Read at call
+ * time like its siblings, so flipping it needs no restart.
  */
 export function threadingPingsEnabled(): boolean {
   const v = (process.env.THREADING_PINGS_ENABLED || '').trim().toLowerCase();
+  if (v === '') return true;
   return ['true', '1', 'on', 'yes'].includes(v);
 }
 

@@ -95,7 +95,7 @@
 | `MEMORY_THESIS_ENABLED` | The weekly thesis rewrite and the per-turn thesis section. Off = no read written or rendered; the file survives. Default on. |
 | `MEMORY_SELF_ENABLED` | The daily SELF.md pass (her own stances, tastes, lessons, changes of mind) and the per-turn self section. Off = nothing written or rendered; the file survives. Default on. |
 | `IRISES_MUSINGS_ENABLED` | Lets her text first about something on her own mind, apart from anything the user set up. Bounds: one a day at most, daytime, only after recent contact and a quiet chat, never a room. Default on. |
-| `THREADING_PINGS_ENABLED` | Lets her *start* a message about a loop left hanging. **Default off** (it buzzes a phone unprompted); hard bounds when on — one ping per person per week, 48h of silence first, never a group, never twice about the same thing. |
+| `THREADING_PINGS_ENABLED` | Lets her *start* a message about a loop left hanging. **Default on** (`configure.sh --pings on\|off`); hard bounds — one ping per person per week, 48h of silence first, never a group, never twice about the same thing. |
 | `FIRST_MOVE_ENABLED` | The one-time install introduction described above. Default on. |
 
 `.env.example` is the annotated local template; `deploy/app.env` carries the shared baseline.

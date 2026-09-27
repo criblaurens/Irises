@@ -25,6 +25,10 @@
 #   --model-base-url URL   required with --model-lane openai; the OpenAI-compatible endpoint
 #   --model-inherit        drop the override and go back to inheriting the engine's model
 #   --web on|off           the browser/CLI debug chat this clone serves (WEB_ENABLED)
+#   --pings on|off         she may text first to ask how a thing you left hanging went
+#                          (THREADING_PINGS_ENABLED; default on)
+#   --musings on|off       she may text first about something on her own mind
+#                          (IRISES_MUSINGS_ENABLED; default on)
 #   --tz ZONE|host         the IANA zone Irises reads the wall clock in (host = this machine's own)
 #   --set KEY=VALUE        set any documented key in this clone's .env (repeatable)
 #   --set KEY              …with the value taken from IRISES_SET_VALUE, which is how a key whose
@@ -96,6 +100,8 @@ MODEL_SLUG=""
 MODEL_BASE_URL=""
 MODEL_INHERIT=0
 WEB_FLAG=""
+PINGS_FLAG=""
+MUSINGS_FLAG=""
 TZ_FLAG=""
 SET_BARE=""
 ALLOW_UNKNOWN=0
@@ -155,6 +161,10 @@ while [ $# -gt 0 ]; do
     --model-inherit)       MODEL_INHERIT=1; shift ;;
     --web)                 WEB_FLAG="${2:-}"; shift; if [ $# -gt 0 ]; then shift; fi ;;
     --web=*)               WEB_FLAG="${1#--web=}"; shift ;;
+    --pings)               PINGS_FLAG="${2:-}"; shift; if [ $# -gt 0 ]; then shift; fi ;;
+    --pings=*)             PINGS_FLAG="${1#--pings=}"; shift ;;
+    --musings)             MUSINGS_FLAG="${2:-}"; shift; if [ $# -gt 0 ]; then shift; fi ;;
+    --musings=*)           MUSINGS_FLAG="${1#--musings=}"; shift ;;
     --tz)                  TZ_FLAG="${2:-}"; shift; if [ $# -gt 0 ]; then shift; fi ;;
     --tz=*)                TZ_FLAG="${1#--tz=}"; shift ;;
     --set)                 push_set "${2:-}"; shift; if [ $# -gt 0 ]; then shift; fi ;;
@@ -165,7 +175,7 @@ while [ $# -gt 0 ]; do
     --yes|-y)              ASSUME_YES=1; shift ;;
     --no-restart)          DO_RESTART=0; shift ;;
     --no-gateway-restart)  DO_GATEWAY=0; shift ;;
-    -h|--help)             sed -n '2,79p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)             sed -n '2,83p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) err "unknown arg: $1 (try --help)"; exit 2 ;;
   esac
 done
@@ -338,6 +348,14 @@ case "$WEB_FLAG" in
   ''|on|off) ;;
   *) err "--web takes on or off, got '$WEB_FLAG'"; exit 2 ;;
 esac
+case "$PINGS_FLAG" in
+  ''|on|off) ;;
+  *) err "--pings takes on or off, got '$PINGS_FLAG'"; exit 2 ;;
+esac
+case "$MUSINGS_FLAG" in
+  ''|on|off) ;;
+  *) err "--musings takes on or off, got '$MUSINGS_FLAG'"; exit 2 ;;
+esac
 # A zone is checked for SHAPE only. Whether the name is one this box's tzdata knows is the server's
 # question (src/pipeline/zonedTime.ts warns and falls back to the host zone), and a script that
 # refused a zone a newer tzdata does know would be the worse failure of the two.
@@ -405,6 +423,7 @@ fi
 HAVE_SETTING=0
 if [ -n "$PORT_FLAG" ] || [ -n "$SERVICE_FLAG" ] || [ "$FRONT_SET" = "1" ] ||
    [ -n "$MODEL_LANE" ] || [ "$MODEL_INHERIT" = "1" ] || [ -n "$WEB_FLAG" ] || [ -n "$TZ_FLAG" ] ||
+   [ -n "$PINGS_FLAG" ] || [ -n "$MUSINGS_FLAG" ] ||
    [ "${#SET_KEYS[@]}" -gt 0 ] || [ -n "$SET_BARE" ] || [ "${#UNSET_KEYS[@]}" -gt 0 ] ||
    [ -n "${IRISES_DASHBOARD_PASSWORD:-}" ]; then
   HAVE_SETTING=1
@@ -465,7 +484,7 @@ engine_env_applied() { # MANIFEST -> 0 = our keys are in the engine's .env
 # most wanted. Nothing here guards for a missing file: env_get, env_count, manifest_read and
 # built_sha all return empty on one, and an extra `[ -f ]` per line would only fork more.
 show_report() {
-  local man v w src kind installed running sha engine reason
+  local man v w src kind installed running sha engine reason pair
   local ef front lane slug role out key pending
 
   man="$(manifest_path)"
@@ -585,6 +604,17 @@ show_report() {
   if [ -n "$v" ]; then src=".env"; else src="default"; fi
   ui "  browser chat:       $w  ($src)"
 
+  # Both are on unless the key says off (src/memory/threadPings.ts, src/persona/featureFlags.ts).
+  for pair in "THREADING_PINGS_ENABLED:thread pings:       " "IRISES_MUSINGS_ENABLED:musings:            "; do
+    v="$(env_get "$ENV_FILE" "${pair%%:*}")"
+    case "$(printf '%s' "$v" | tr '[:upper:]' '[:lower:]')" in
+      ''|true|1|on|yes) w="on" ;;
+      *) w="off" ;;
+    esac
+    if [ -n "$v" ]; then src=".env"; else src="default"; fi
+    ui "  ${pair#*:}$w  ($src)"
+  done
+
   v="$(env_get "$ENV_FILE" IRISES_TZ)"
   if [ -n "$v" ]; then
     ui "  timezone:           $v  (.env)"
@@ -670,6 +700,14 @@ if [ -n "$WEB_FLAG" ]; then
   else
     plan_add "$ENV_FILE" set WEB_ENABLED false
   fi
+fi
+if [ -n "$PINGS_FLAG" ]; then
+  if [ "$PINGS_FLAG" = "on" ]; then v=true; else v=false; fi
+  plan_add "$ENV_FILE" set THREADING_PINGS_ENABLED "$v"
+fi
+if [ -n "$MUSINGS_FLAG" ]; then
+  if [ "$MUSINGS_FLAG" = "on" ]; then v=true; else v=false; fi
+  plan_add "$ENV_FILE" set IRISES_MUSINGS_ENABLED "$v"
 fi
 
 # `host` is the ABSENCE of the key, not a zone by that name: with IRISES_TZ unset

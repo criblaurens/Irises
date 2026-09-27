@@ -931,7 +931,7 @@ WIZ_OUT="$(cd "$CLONE" && printf '%s\n' \
   2 2 "$WIZ_MODEL" "$WIZ_KEY" \
   2 'telegram:*' \
   "$SRV_PORT" n \
-  y y '' UTC \
+  y y y y '' UTC \
   y q \
   | bash scripts/irises.sh 2>&1)"
 WIZ_RC=$?
@@ -940,7 +940,7 @@ printf '%s\n' "$WIZ_OUT" | sed 's/^/    | /'
 check_rc "the menu ran to its own quit" 0 "$WIZ_RC"
 # The line, exactly as composed: this is the assertion that keeps the two surfaces together.
 check_out "the wizard printed the command line it composed" \
-  "bash scripts/engine-setup.sh --engine hermes --port $SRV_PORT --engine-env ask --no-service --front 'telegram:*' --model-lane openrouter --model-slug $WIZ_MODEL --web on --tz UTC" \
+  "bash scripts/engine-setup.sh --engine hermes --port $SRV_PORT --engine-env ask --no-service --front 'telegram:*' --model-lane openrouter --model-slug $WIZ_MODEL --web on --pings on --musings on --tz UTC" \
   "$WIZ_OUT"
 check_out "and named the key as an environment variable that is set" "IRISES_MODEL_API_KEY=<set>" "$WIZ_OUT"
 check_no_out "while the key itself never reached the screen" "$WIZ_KEY" "$WIZ_OUT"
@@ -1097,7 +1097,7 @@ check "and the restart was real — a new pid" pid_changed "$CFG_PID" "$(srv_pid
 
 # 5. the generic editor — any documented key, with the value on the line because this one is not a
 # secret by name (the ones that are travel in IRISES_SET_VALUE and print as <set>).
-cfg_menu 2 7 1 CONVO_EFFORT low
+cfg_menu 2 8 1 CONVO_EFFORT low
 check_out "the key and value became one --set argument" \
   "bash scripts/configure.sh --set CONVO_EFFORT=low" "$CFG_OUT"
 check "the key landed in this clone's .env" present "$CLONE/.env" '^CONVO_EFFORT=low$'

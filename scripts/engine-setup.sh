@@ -78,6 +78,8 @@ MODEL_BASE_URL=""
 # has always had, and an unset IRISES_TZ keeps the host's own zone. The dashboard password is a
 # secret and follows the model key's rule — environment only, never argv.
 WEB_FLAG=""
+PINGS_FLAG=""
+MUSINGS_FLAG=""
 TZ_FLAG=""
 
 usage() {
@@ -105,6 +107,10 @@ usage: bash ./scripts/engine-setup.sh [options]          # install
   --model-base-url URL       required with --model-lane openai; the OpenAI-compatible endpoint
   --web on|off               the browser/CLI debug chat this clone serves (WEB_ENABLED). Unset
                              leaves it as this clone's .env has it (a fresh install: on)
+  --pings on|off             she may text first to ask how a thing you left hanging went
+                             (THREADING_PINGS_ENABLED). Unset leaves the default: on
+  --musings on|off           she may text first about something on her own mind
+                             (IRISES_MUSINGS_ENABLED). Unset leaves the default: on
   --tz ZONE                  the IANA zone Irises reads the wall clock in (IRISES_TZ). Unset leaves
                              it unset, which is the host's own zone
   --uninstall                remove Irises: service, plugin, engine keys. Your data is KEPT, and so
@@ -149,6 +155,10 @@ while [ $# -gt 0 ]; do
     --model-base-url=*) MODEL_BASE_URL="${1#--model-base-url=}"; shift ;;
     --web)         WEB_FLAG="${2:-}"; shift; if [ $# -gt 0 ]; then shift; fi ;;
     --web=*)       WEB_FLAG="${1#--web=}"; shift ;;
+    --pings)       PINGS_FLAG="${2:-}"; shift; if [ $# -gt 0 ]; then shift; fi ;;
+    --pings=*)     PINGS_FLAG="${1#--pings=}"; shift ;;
+    --musings)     MUSINGS_FLAG="${2:-}"; shift; if [ $# -gt 0 ]; then shift; fi ;;
+    --musings=*)   MUSINGS_FLAG="${1#--musings=}"; shift ;;
     --tz)          TZ_FLAG="${2:-}"; shift; if [ $# -gt 0 ]; then shift; fi ;;
     --tz=*)        TZ_FLAG="${1#--tz=}"; shift ;;
     --uninstall)   MODE="uninstall"; shift ;;
@@ -208,6 +218,14 @@ esac
 case "$WEB_FLAG" in
   ''|on|off) ;;
   *) err "--web takes on or off, got '$WEB_FLAG'"; exit 2 ;;
+esac
+case "$PINGS_FLAG" in
+  ''|on|off) ;;
+  *) err "--pings takes on or off, got '$PINGS_FLAG'"; exit 2 ;;
+esac
+case "$MUSINGS_FLAG" in
+  ''|on|off) ;;
+  *) err "--musings takes on or off, got '$MUSINGS_FLAG'"; exit 2 ;;
 esac
 # A zone is checked for SHAPE only. Whether the name is one this box's tzdata knows is the server's
 # question (src/pipeline/zonedTime.ts warns and falls back to the host zone), and a script that
@@ -406,7 +424,7 @@ do_install() {
   local engine port kind node_bin unit="" plugin_dir="" adopted=0
   local keys_added="" keys_pre="" prev_added="" backup="" restore_from="" token engine_env=""
   local keys_retargeted="" prev_retargeted=""
-  local sha="" live_sha="" gateway_ok=1 result="ok" rc=0 mem_mb=""
+  local sha="" live_sha="" gateway_ok=1 result="ok" rc=0 mem_mb="" v=""
   # Did THIS run put anything of ours in the engine's .env? Only a hermes install that wrote can say
   # true, and only `true` makes --uninstall (and --detach-engine) touch that file at all.
   local engine_env_write=1 engine_env_applied=false engine_env_pending=""
@@ -483,6 +501,16 @@ do_install() {
       env_set "$ENV_FILE" WEB_ENABLED "false"
       say "WEB_ENABLED=false — no browser chat on :$port; the engine's own channels are unaffected"
     fi
+  fi
+  if [ -n "$PINGS_FLAG" ]; then
+    if [ "$PINGS_FLAG" = "on" ]; then v=true; else v=false; fi
+    env_set "$ENV_FILE" THREADING_PINGS_ENABLED "$v"
+    say "THREADING_PINGS_ENABLED=$v — whether she texts first about a thing you left hanging"
+  fi
+  if [ -n "$MUSINGS_FLAG" ]; then
+    if [ "$MUSINGS_FLAG" = "on" ]; then v=true; else v=false; fi
+    env_set "$ENV_FILE" IRISES_MUSINGS_ENABLED "$v"
+    say "IRISES_MUSINGS_ENABLED=$v — whether she texts first about what is on her own mind"
   fi
   if [ -n "$TZ_FLAG" ]; then
     env_set "$ENV_FILE" IRISES_TZ "$TZ_FLAG"

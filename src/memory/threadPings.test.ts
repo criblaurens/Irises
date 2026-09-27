@@ -77,11 +77,14 @@ afterEach(() => {
 
 // ── The flags ────────────────────────────────────────────────────────────────
 
-// THE divergence from the house style, and the reason it is a test and not just a comment: every
-// other memory flag defaults ON because it only colours a reply. This one texts a phone.
-test('pings are OFF unless the install opted in — off costs no read, no write, no send', async () => {
+// Default on, and the off switch costs nothing: no read, no write, no send.
+test('pings are ON unless the install turned them off — off costs no read, no write, no send', async () => {
   delete process.env.THREADING_PINGS_ENABLED;
-  assert.equal(threadingPingsEnabled(), false, 'unset means OFF here, unlike every sibling flag');
+  assert.equal(threadingPingsEnabled(), true, 'unset means ON, like every sibling flag');
+  process.env.THREADING_PINGS_ENABLED = '';
+  assert.equal(threadingPingsEnabled(), true, 'empty is unset');
+  process.env.THREADING_PINGS_ENABLED = 'off';
+  assert.equal(threadingPingsEnabled(), false);
 
   await seed(H, { loops: [loop()] }, CHAT);
   const s = spy();
@@ -93,7 +96,7 @@ test('pings are OFF unless the install opted in — off costs no read, no write,
   assert.equal(inv.lastPingAt, 0, 'and nothing was billed — the flags are read before the store is');
   assert.equal(inv.pending, null);
 
-  // Negative control: the very same fixture DOES ping once the install opts in, so the assertions
+  // Negative control: the very same fixture DOES ping once the flag is back on, so the assertions
   // above are about the flag and not about a fixture that could never have fired.
   process.env.THREADING_PINGS_ENABLED = 'true';
   await runThreadPingSweep(s, { now: T0 });

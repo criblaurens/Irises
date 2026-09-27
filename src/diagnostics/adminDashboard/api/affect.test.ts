@@ -473,7 +473,7 @@ test('the familiarity row is the stored level, the band it cuts to, and what eac
   const f = familiaritySummary(FAM_ROW, FAM_EVIDENCE, status(), { enabled: true, group: false });
   assert.deepEqual(
     { level: f.level, band: f.band, effectiveBand: f.effectiveBand, reguarded: f.reguarded, ceiling: f.ceiling, turns: f.turns, activeDays: f.activeDays },
-    { level: 52, band: 'familiar', effectiveBand: 'familiar', reguarded: false, ceiling: 52, turns: 40, activeDays: 14 },
+    { level: 52, band: 'familiar', effectiveBand: 'familiar', reguarded: false, ceiling: 100, turns: 40, activeDays: 14 },
   );
   assert.deepEqual(f.sources.find(s => s.key === 'statedFacts'), { key: 'statedFacts', count: 3, points: 6, cap: 16 });
   assert.deepEqual(f.sources.find(s => s.key === 'turns'), { key: 'turns', count: 40, points: 10, cap: 20 });
@@ -494,7 +494,7 @@ test('no row yet reads as a stranger at the bottom, and a room is a stranger wha
   const none = familiaritySummary(null, emptyEvidence(), undefined, { enabled: true, group: false });
   assert.deepEqual(
     { level: none.level, band: none.band, effectiveBand: none.effectiveBand, ceiling: none.ceiling, turns: none.turns, activeDays: none.activeDays },
-    { level: 1, band: 'stranger', effectiveBand: 'stranger', ceiling: 10, turns: 0, activeDays: 0 },
+    { level: 1, band: 'stranger', effectiveBand: 'stranger', ceiling: 30, turns: 0, activeDays: 0 },
   );
   const room = familiaritySummary({ ...FAM_ROW, level: 90 }, FAM_EVIDENCE, status(), { enabled: true, group: true });
   assert.equal(room.band, 'stranger');

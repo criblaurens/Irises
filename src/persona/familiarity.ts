@@ -47,9 +47,10 @@ export const BAND_FLOORS: Record<FamiliarityBand, number> = {
   stranger: 1, acquaintance: 25, familiar: 50, close: 75,
 };
 
-/** The pace ceiling: ten on no days, three more for every day they have actually talked. */
-export const PACE_BASE = 10;
-export const PACE_PER_DAY = 3;
+/** The pace ceiling: thirty on no days, ten more for every day they have actually talked. Familiar is
+ *  in reach on day two and the ceiling is gone by day seven; the evidence still has to be there. */
+export const PACE_BASE = 30;
+export const PACE_PER_DAY = 10;
 
 /** The ten things a level is made of: two of lived exchange (the ledger row's own counters) and
  *  eight of held evidence (read off the memory stores when the pass runs). */
@@ -75,7 +76,7 @@ export type FamiliaritySourceKey =
  */
 export const FAMILIARITY_SOURCES: ReadonlyArray<{ key: FamiliaritySourceKey; each: number; cap: number }> = [
   { key: 'turns', each: 0.25, cap: 20 },
-  { key: 'activeDays', each: 1, cap: 20 },
+  { key: 'activeDays', each: 8, cap: 20 },
   { key: 'statedFacts', each: 2, cap: 16 },
   { key: 'inferredFacts', each: 1, cap: 6 },
   { key: 'seededFacts', each: 0.5, cap: 4 },
@@ -137,7 +138,7 @@ export function evidenceScore(ev: FamiliarityEvidence): number {
   return sourcePoints(ev).reduce((n, s) => n + s.points, 0);
 }
 
-/** How far the level may have got by now: ten, plus three per active day, at most a hundred. */
+/** How far the level may have got by now: thirty, plus ten per active day, at most a hundred. */
 export function paceCeiling(activeDays: number): number {
   const days = Math.floor(countOf(activeDays));
   return Math.min(FAMILIARITY_CEILING, PACE_BASE + PACE_PER_DAY * days);
@@ -179,7 +180,7 @@ export function familiarityBandFor(read: { group: boolean; level: number | null 
 }
 
 /** The most days a first row is seeded with: the day the pace ceiling reaches a hundred. */
-export const FAMILIARITY_SEED_DAYS_CAP = 30;
+export const FAMILIARITY_SEED_DAYS_CAP = 7;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

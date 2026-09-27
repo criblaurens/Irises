@@ -100,18 +100,18 @@ async function seedEverything(harvestCount = 0): Promise<void> {
 
 // ── the counters ─────────────────────────────────────────────────────────────
 
-test('a first replied turn opens a row at the bottom and counts the turn and the day', async () => {
+test('a first replied turn opens a row on its target and counts the turn and the day', async () => {
   await updateFamiliarity(H, { now: T0 });
-  assert.deepEqual(await row(H), { level: 1, turns: 1, activeDays: 1, lastDay: '2026-09-20' });
+  assert.deepEqual(await row(H), { level: 8, turns: 1, activeDays: 1, lastDay: '2026-09-20' });
 });
 
 test('the same day is one day however many turns it holds, and the next day is another', async () => {
   await updateFamiliarity(H, { now: T0 });
   await updateFamiliarity(H, { now: T0 + 60_000 });
   await updateFamiliarity(H, { now: T0 + 3 * 60 * 60 * 1000 });
-  assert.deepEqual(await row(H), { level: 1, turns: 3, activeDays: 1, lastDay: '2026-09-20' });
+  assert.deepEqual(await row(H), { level: 8, turns: 3, activeDays: 1, lastDay: '2026-09-20' });
   await updateFamiliarity(H, { now: T0 + DAY });
-  assert.deepEqual(await row(H), { level: 3, turns: 4, activeDays: 2, lastDay: '2026-09-21' });
+  assert.deepEqual(await row(H), { level: 10, turns: 4, activeDays: 2, lastDay: '2026-09-21' });
 });
 
 test('passes fired together still count every turn', async () => {
@@ -126,30 +126,30 @@ test('someone she has known for months lands on their target on the first pass, 
   await seedEverything(120);
   await updateFamiliarity(H, { now: T0 });
   const first = await row(H);
-  const target = targetLevel(await gatherFamiliarityEvidence(H, { turns: 121, activeDays: 31 }));
-  assert.deepEqual(first, { level: target, turns: 121, activeDays: 31, lastDay: '2026-09-20' },
-    'days capped at thirty and the harvested turns, today on top, and the level straight to the target');
+  const target = targetLevel(await gatherFamiliarityEvidence(H, { turns: 121, activeDays: 8 }));
+  assert.deepEqual(first, { level: target, turns: 121, activeDays: 8, lastDay: '2026-09-20' },
+    'days capped at seven and the harvested turns, today on top, and the level straight to the target');
   assert.equal(bandOf(target), 'familiar', 'months of held material: no stranger for days');
   // Every later pass slews: with her stances switched off the target falls six, the level two.
   process.env.MEMORY_SELF_ENABLED = 'off';
   await updateFamiliarity(H, { now: T0 + 60_000 });
-  assert.deepEqual(await row(H), { level: target - FAMILIARITY_SLEW, turns: 122, activeDays: 31, lastDay: '2026-09-20' },
+  assert.deepEqual(await row(H), { level: target - FAMILIARITY_SLEW, turns: 122, activeDays: 8, lastDay: '2026-09-20' },
     'a row exists now, so the counters are its own and the move is paced');
 });
 
-test('someone new lands where the evidence and the pace put them, which is the bottom', async () => {
+test('someone new lands where the evidence and the pace put them, which is near the bottom', async () => {
   await firstSeenAt(H, T0);
   await updateFamiliarity(H, { now: T0 });
   const first = await row(H);
-  assert.ok((first?.level ?? 0) <= 13, 'one day allows thirteen at most');
-  assert.deepEqual(first, { level: 1, turns: 1, activeDays: 1, lastDay: '2026-09-20' }, 'nothing held: the bottom, and today counted');
+  assert.ok((first?.level ?? 0) <= 40, 'one day allows forty at most');
+  assert.deepEqual(first, { level: 8, turns: 1, activeDays: 1, lastDay: '2026-09-20' }, 'nothing held but today: one turn and one day, and today counted');
 });
 
 test('a fact dump the evening she meets them still stops at the pace ceiling', async () => {
   await firstSeenAt(H, T0);
-  await seedEverything();
+  await seedEverything(200);
   await updateFamiliarity(H, { now: T0 });
-  assert.equal((await row(H))?.level, 13, 'one active day allows thirteen, whatever she holds');
+  assert.equal((await row(H))?.level, 40, 'one active day allows forty, whatever she holds');
 });
 
 test('an unreadable store on the first pass stores the seeded counters at the start, and the next pass slews', async () => {
@@ -164,7 +164,7 @@ test('an unreadable store on the first pass stores the seeded counters at the st
   } finally {
     console.error = original;
   }
-  assert.deepEqual(await row(H), { level: FAMILIARITY_START, turns: 121, activeDays: 31, lastDay: '2026-09-20' },
+  assert.deepEqual(await row(H), { level: FAMILIARITY_START, turns: 121, activeDays: 8, lastDay: '2026-09-20' },
     'a first row that could not read its evidence does not jump, and its tenure is still kept');
   fs.rmSync(broken, { recursive: true, force: true });
   await updateFamiliarity(H, { now: T0 + 60_000 });
@@ -188,8 +188,8 @@ test('the stored level moves at most two points a turn, in either direction', as
 // less. A directory where the file should be is the stores' own unreadable fixture (moments.test.ts).
 for (const file of ['MOMENTS.md', 'SELF.md']) {
   test(`an unreadable ${file} holds the level where it was, and the turn still counts`, async () => {
-    // Nothing held and a short tenure: the target sits below the stored thirty, so a clean read falls.
-    await saveFamiliarity(H, { level: 30, turns: 50, activeDays: 10, lastDay: '2026-09-19' });
+    // Nothing held and a short tenure: the target sits below the stored forty, so a clean read falls.
+    await saveFamiliarity(H, { level: 40, turns: 50, activeDays: 10, lastDay: '2026-09-19' });
     const broken = path.join(memoriesDir(H), file);
     fs.mkdirSync(broken, { recursive: true });
     const original = console.error;
@@ -199,11 +199,11 @@ for (const file of ['MOMENTS.md', 'SELF.md']) {
     } finally {
       console.error = original;
     }
-    assert.deepEqual(await row(H), { level: 30, turns: 51, activeDays: 11, lastDay: '2026-09-20' }, 'held, and counted');
+    assert.deepEqual(await row(H), { level: 40, turns: 51, activeDays: 11, lastDay: '2026-09-20' }, 'held, and counted');
     // The same pass over a readable store does fall, so the hold was the degraded read.
     fs.rmSync(broken, { recursive: true, force: true });
     await updateFamiliarity(H, { now: T0 + 60_000 });
-    assert.equal((await row(H))?.level, 30 - FAMILIARITY_SLEW, 'a clean read slews as usual');
+    assert.equal((await row(H))?.level, 40 - FAMILIARITY_SLEW, 'a clean read slews as usual');
   });
 }
 

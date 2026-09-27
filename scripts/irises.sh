@@ -278,6 +278,8 @@ W_FRONT=""
 W_PORT=""
 W_SERVICE=1
 W_WEB=""
+W_PINGS=""
+W_MUSINGS=""
 W_TZ=""
 W_DASH_PW=""
 
@@ -381,10 +383,12 @@ wiz_port_service() { # step 5
 
 wiz_extras() { # step 6
   local tz
-  W_WEB=""; W_TZ=""; W_DASH_PW=""
+  W_WEB=""; W_PINGS=""; W_MUSINGS=""; W_TZ=""; W_DASH_PW=""
   say "Step 6 of 7 — optional extras"
-  if ! ask_yn "Set optional extras (dashboard, timezone)?" n; then return 0; fi
+  if ! ask_yn "Set optional extras (dashboard, timezone, texting first)?" n; then return 0; fi
   if ask_yn "Enable the browser chat UI (and npm run chat)?" y; then W_WEB="on"; else W_WEB="off"; fi
+  if ask_yn "Let her text first to ask how things you left hanging went?" y; then W_PINGS="on"; else W_PINGS="off"; fi
+  if ask_yn "Let her text first about what is on her own mind?" y; then W_MUSINGS="on"; else W_MUSINGS="off"; fi
   W_DASH_PW="$(ask_secret "Dashboard password (blank = keep the shipped default):")" || W_DASH_PW=""
   # The default offered is the host's own zone, which is what an unset IRISES_TZ already means — so
   # the answer is a confirmation rather than a guess. It is written even when it EQUALS that zone:
@@ -410,7 +414,7 @@ wiz_summary_apply() { # step 7 — 0 = applied or declined cleanly
   fi
   extras_desc="left as they are"
   if [ -n "$W_WEB" ] || [ -n "$W_TZ" ] || [ -n "$W_DASH_PW" ]; then
-    extras_desc="${W_WEB:+browser chat $W_WEB}${W_TZ:+ · timezone $W_TZ}${W_DASH_PW:+ · dashboard password set}"
+    extras_desc="${W_WEB:+browser chat $W_WEB}${W_PINGS:+ · thread pings $W_PINGS}${W_MUSINGS:+ · musings $W_MUSINGS}${W_TZ:+ · timezone $W_TZ}${W_DASH_PW:+ · dashboard password set}"
   fi
   if [ "$W_ENGINE" = "hermes" ]; then
     env_desc="previewed line by line before anything is written"
@@ -448,6 +452,8 @@ wiz_summary_apply() { # step 7 — 0 = applied or declined cleanly
     if [ -n "$W_MODEL_URL" ]; then set -- "$@" --model-base-url "$W_MODEL_URL"; fi
   fi
   if [ -n "$W_WEB" ]; then set -- "$@" --web "$W_WEB"; fi
+  if [ -n "$W_PINGS" ]; then set -- "$@" --pings "$W_PINGS"; fi
+  if [ -n "$W_MUSINGS" ]; then set -- "$@" --musings "$W_MUSINGS"; fi
   if [ -n "$W_TZ" ]; then set -- "$@" --tz "$W_TZ"; fi
   # The two secrets, handed over in the environment and gone from this process immediately after.
   # --yes is NOT passed: the engine-.env preview is the child's question to ask, and this is the one
@@ -601,6 +607,31 @@ cfg_web() {
   return 0
 }
 
+cfg_texting() {
+  local pings_def musings_def
+  say "whether she texts first (THREADING_PINGS_ENABLED, IRISES_MUSINGS_ENABLED)"
+  # Offered as the box is NOW, cfg_web's rule. Both are on unless the key says off.
+  case "$(env_get "$ROOT/.env" THREADING_PINGS_ENABLED | tr '[:upper:]' '[:lower:]')" in
+    ''|true|1|on|yes) pings_def="y" ;; *) pings_def="n" ;;
+  esac
+  case "$(env_get "$ROOT/.env" IRISES_MUSINGS_ENABLED | tr '[:upper:]' '[:lower:]')" in
+    ''|true|1|on|yes) musings_def="y" ;; *) musings_def="n" ;;
+  esac
+  if ask_yn "Let her text first to ask how things you left hanging went?" "$pings_def"; then
+    set -- --pings on
+  else
+    set -- --pings off
+  fi
+  if ask_yn "Let her text first about what is on her own mind?" "$musings_def"; then
+    set -- "$@" --musings on
+  else
+    set -- "$@" --musings off
+  fi
+  run_child "$CONFIGURE_SH" "$CONFIGURE_NAME" "$@"
+  next_steps
+  return 0
+}
+
 cfg_tz() {
   local tz
   say "the wall clock Irises reads — it is what she calls late, not a formatting preference"
@@ -695,8 +726,9 @@ menu_configure() {
     ui "  3) The model her voice runs on"
     ui "  4) Browser chat UI"
     ui "  5) Timezone"
-    ui "  6) Dashboard password"
-    ui "  7) Set or unset any .env key (advanced)"
+    ui "  6) Texting first (thread pings, musings)"
+    ui "  7) Dashboard password"
+    ui "  8) Set or unset any .env key (advanced)"
     ui "  b) Back"
     # Back is the default, on the same rule as Uninstall: every other entry on this menu changes
     # something, and an Enter meant for the menu above must not be one of them.
@@ -708,9 +740,10 @@ menu_configure() {
       3) cfg_model; return 0 ;;
       4) cfg_web; return 0 ;;
       5) cfg_tz; return 0 ;;
-      6) cfg_dashboard; return 0 ;;
-      7) cfg_any_key; return 0 ;;
-      *) warn "1, 2, 3, 4, 5, 6, 7 or b" ;;
+      6) cfg_texting; return 0 ;;
+      7) cfg_dashboard; return 0 ;;
+      8) cfg_any_key; return 0 ;;
+      *) warn "1, 2, 3, 4, 5, 6, 7, 8 or b" ;;
     esac
   done
 }

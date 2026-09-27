@@ -6,10 +6,10 @@
 //     hundred, so a person she holds everything about, over enough days, is a hundred.
 //   • WHO SAYS SO DISCOUNTS. A fact they stated is worth more than one she guessed, and a guess more
 //     than one the engine handed over.
-//   • THE PACE IS THE DAYS. However much she holds, the level cannot pass ten plus three per active
+//   • THE PACE IS THE DAYS. However much she holds, the level cannot pass thirty plus ten per active
 //     day, so a fact dump in one evening hits the ceiling.
 //   • THE SLEW IS TWO. The stored level moves at most two points a turn either way.
-//   • A FIRST ROW IS SEEDED FROM TENURE. The days since they were first seen, capped at thirty, and
+//   • A FIRST ROW IS SEEDED FROM TENURE. The days since they were first seen, capped at seven, and
 //     the turns the thread harvest has counted, with today's tick on top.
 //   • A ROOM IS A STRANGER, whatever is stored.
 process.env.TZ = 'UTC';
@@ -32,7 +32,7 @@ const only = (key: FamiliaritySourceKey, count: number): FamiliarityEvidence => 
 test('the source table is the spec table, in its order, and the caps sum to a hundred', () => {
   assert.deepEqual(FAMILIARITY_SOURCES.map(s => [s.key, s.each, s.cap]), [
     ['turns', 0.25, 20],
-    ['activeDays', 1, 20],
+    ['activeDays', 8, 20],
     ['statedFacts', 2, 16],
     ['inferredFacts', 1, 6],
     ['seededFacts', 0.5, 4],
@@ -70,14 +70,14 @@ test('who says so discounts a fact: stated over inferred over seeded', () => {
 
 // ══ 2. The pace, the slew, the bands ═════════════════════════════════════════
 
-test('the pace ceiling is ten plus three per active day, and never past a hundred', () => {
-  assert.equal(paceCeiling(0), 10);
-  assert.equal(paceCeiling(1), 13);
-  assert.equal(paceCeiling(5), 25, 'a daily texter can reach acquaintance around day five');
-  assert.equal(paceCeiling(14), 52, 'familiar around day fourteen');
-  assert.equal(paceCeiling(30), 100);
+test('the pace ceiling is thirty plus ten per active day, and never past a hundred', () => {
+  assert.equal(paceCeiling(0), 30);
+  assert.equal(paceCeiling(1), 40);
+  assert.equal(paceCeiling(2), 50, 'familiar is in reach on day two');
+  assert.equal(paceCeiling(5), 80, 'close by day five');
+  assert.equal(paceCeiling(7), 100);
   assert.equal(paceCeiling(1_000), 100);
-  assert.equal(paceCeiling(-4), 10, 'a garbled count is no days');
+  assert.equal(paceCeiling(-4), 30, 'a garbled count is no days');
 });
 
 test('the target is the evidence under the pace ceiling, so a fact dump in one evening hits the ceiling', () => {
@@ -85,9 +85,9 @@ test('the target is the evidence under the pace ceiling, so a fact dump in one e
     ...emptyEvidence(), turns: 30, activeDays: 1, statedFacts: 50, moments: 20, themesTaken: 10, selfEntries: 10,
   };
   assert.ok(evidenceScore(dump) > 50, 'she holds a lot');
-  assert.equal(targetLevel(dump), 13, 'one active day allows thirteen, whatever she holds');
+  assert.equal(targetLevel(dump), 40, 'one active day allows forty, whatever she holds');
   // Fractional evidence floors, and nothing held is the bottom of the scale, never zero.
-  assert.equal(targetLevel({ ...emptyEvidence(), turns: 3, activeDays: 1 }), 1);
+  assert.equal(targetLevel({ ...emptyEvidence(), turns: 3, activeDays: 1 }), 8);
   assert.equal(targetLevel(emptyEvidence()), 1);
 });
 
@@ -149,12 +149,12 @@ test('a turn counts once and a UTC day counts once, however many turns it holds'
   assert.deepEqual(tickCounters({ turns: 9, activeDays: 3, lastDay: '' }, t0), { turns: 10, activeDays: 4, lastDay: '2026-09-20' });
 });
 
-test('a first row is seeded from tenure: whole days since first seen up to thirty, and the harvested turns', () => {
+test('a first row is seeded from tenure: whole days since first seen up to seven, and the harvested turns', () => {
   const now = Date.UTC(2026, 8, 20, 12, 0, 0);
   const DAY = 24 * 60 * 60 * 1000;
-  assert.equal(FAMILIARITY_SEED_DAYS_CAP, 30, 'the day the pace ceiling reaches a hundred');
+  assert.equal(FAMILIARITY_SEED_DAYS_CAP, 7, 'the day the pace ceiling reaches a hundred');
   assert.equal(paceCeiling(FAMILIARITY_SEED_DAYS_CAP), 100);
-  assert.deepEqual(seedCounters({ firstSeenMs: now - 200 * DAY, harvestCount: 120 }, now), { turns: 120, activeDays: 30, lastDay: '' });
+  assert.deepEqual(seedCounters({ firstSeenMs: now - 200 * DAY, harvestCount: 120 }, now), { turns: 120, activeDays: 7, lastDay: '' });
   assert.equal(seedCounters({ firstSeenMs: now - 5.5 * DAY, harvestCount: 0 }, now).activeDays, 5, 'whole days only');
   assert.equal(seedCounters({ firstSeenMs: now - 60_000, harvestCount: 0 }, now).activeDays, 0, 'first seen today is no days yet');
   assert.deepEqual(seedCounters({ firstSeenMs: null, harvestCount: 0 }, now), { turns: 0, activeDays: 0, lastDay: '' }, 'no profile, no tenure');
@@ -170,7 +170,7 @@ test('a first row is seeded from tenure: whole days since first seen up to thirt
 test('the tick on a seed counts today\'s turn and day on top, and an empty seed ticks like no row at all', () => {
   const now = Date.UTC(2026, 8, 20, 12, 0, 0);
   const seed = seedCounters({ firstSeenMs: now - 200 * 24 * 60 * 60 * 1000, harvestCount: 120 }, now);
-  assert.deepEqual(tickCounters(seed, now), { turns: 121, activeDays: 31, lastDay: '2026-09-20' });
+  assert.deepEqual(tickCounters(seed, now), { turns: 121, activeDays: 8, lastDay: '2026-09-20' });
   assert.deepEqual(tickCounters(seedCounters({ firstSeenMs: null, harvestCount: 0 }, now), now), tickCounters(null, now));
 });
 
@@ -196,12 +196,11 @@ test('a daily texter she holds a lot about opens the bands on the pace ceiling',
   const { bandOnDay, level } = walk({
     statedFacts: 8, inferredFacts: 6, seededFacts: 8, name: 1, moments: 6, themesTaken: 4, loops: 4, selfEntries: 4,
   });
-  assert.equal(bandOnDay[4], 'stranger');
-  assert.equal(bandOnDay[5], 'acquaintance');
-  assert.equal(bandOnDay[13], 'acquaintance');
-  assert.equal(bandOnDay[14], 'familiar');
-  assert.equal(bandOnDay[21], 'familiar');
-  assert.equal(bandOnDay[22], 'close');
+  assert.equal(bandOnDay[1], 'stranger');
+  assert.equal(bandOnDay[2], 'acquaintance');
+  assert.equal(bandOnDay[3], 'familiar');
+  assert.equal(bandOnDay[4], 'familiar');
+  assert.equal(bandOnDay[5], 'close');
   assert.equal(level, 100);
 });
 

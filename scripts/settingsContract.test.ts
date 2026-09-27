@@ -83,6 +83,8 @@ const SETTINGS: readonly Setting[] = [
   { name: 'model slug', installHelp: ['--model-slug'], configureHelp: ['--model-slug'], installMenu: ['--model-slug'], configureMenu: ['--model-slug'] },
   { name: 'model base URL', installHelp: ['--model-base-url'], configureHelp: ['--model-base-url'], installMenu: ['--model-base-url'], configureMenu: ['--model-base-url'] },
   { name: 'browser chat', installHelp: ['--web'], configureHelp: ['--web'], installMenu: ['--web'], configureMenu: ['--web'] },
+  { name: 'thread pings', installHelp: ['--pings'], configureHelp: ['--pings'], installMenu: ['--pings'], configureMenu: ['--pings'] },
+  { name: 'musings', installHelp: ['--musings'], configureHelp: ['--musings'], installMenu: ['--musings'], configureMenu: ['--musings'] },
   { name: 'timezone', installHelp: ['--tz'], configureHelp: ['--tz'], installMenu: ['--tz'], configureMenu: ['--tz'] },
   // Env-only settings. No flag anywhere, in either script, by design — so the four places carry the
   // variable's name and the reverse diff below never sees them.

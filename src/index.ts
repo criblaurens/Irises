@@ -1251,8 +1251,8 @@ app.listen(PORT, () => {
     setOpsTaskSink(opsRecovery.sink);
     opsRecovery.start();
   }
-  // Thread-revisit pings: the hourly sweep that asks how a thing they left hanging went. Off unless
-  // THREADING_PINGS_ENABLED says otherwise — the one memory surface that texts a phone unprompted.
+  // Thread-revisit pings: the hourly sweep that asks how a thing they left hanging went. On unless
+  // THREADING_PINGS_ENABLED says off (scripts/configure.sh --pings).
   initThreadPings({ deliver: proactive.deliver });
   // Her own texts: the hourly sweep that lets her start a conversation because something is on HER
   // mind (memory/musings.ts). Its own line, apart from every setup of theirs; IRISES_MUSINGS_ENABLED.
