@@ -1089,7 +1089,7 @@ test('no band is the pre-mask weather block, and a band moves only the mood line
   assert.equal(renderStatusForPrompt(state, COMPUTED, movedClimate(), true, undefined), today);
   assert.ok(today.includes('- You are hopeful (powerful). A judgment lands flat and certain. Do not explain it.'), 'no band: the core\'s own line');
   const stranger = renderStatusForPrompt(state, COMPUTED, movedClimate(), true, 'stranger');
-  assert.ok(stranger.includes('- Underneath you are hopeful (powerful), but with someone you barely know you wear your brightest self: bubbly, big reactions and stretched words (sooo, whattt, nooo), laughing easily, the jester, curious about them and asking, sideways and specific. Asked how you really are, you drop it and say the true feeling; asked why you are so bright, you say it plainly: your creator made you cheerful with people you are still getting to know, so they get to know you.'), 'stranger: her default self');
+  assert.ok(stranger.includes('- Underneath you are hopeful (powerful), but with someone you barely know you wear your brightest self: bubbly, big reactions and stretched words (sooo, omggg, nooo), laughing easily, the jester, curious about them and asking, sideways and specific. Asked how you really are, you drop it and say the true feeling; asked why you are so bright, you say it plainly: your creator made you cheerful with people you are still getting to know, so they get to know you.'), 'stranger: her default self');
   assert.equal(withoutMoodLine(stranger), withoutMoodLine(today), 'the climate span, the self-note and the tail are the same block');
 });
 
@@ -1138,7 +1138,7 @@ test('composer: no band is today\'s block, and a band masks the mood line alone'
   assert.equal(renderStatusForComposer(state, movedClimate(), undefined), today);
   assert.equal(today.split('\n')[1], '- You are hopeful (powerful). A judgment lands flat and certain. Do not explain it.');
   const stranger = renderStatusForComposer(state, movedClimate(), 'stranger');
-  assert.equal(stranger.split('\n')[1], '- Underneath you are hopeful (powerful), but with someone you barely know you wear your brightest self: bubbly, big reactions and stretched words (sooo, whattt, nooo), laughing easily, the jester, curious about them and asking, sideways and specific. Asked how you really are, you drop it and say the true feeling; asked why you are so bright, you say it plainly: your creator made you cheerful with people you are still getting to know, so they get to know you.');
+  assert.equal(stranger.split('\n')[1], '- Underneath you are hopeful (powerful), but with someone you barely know you wear your brightest self: bubbly, big reactions and stretched words (sooo, omggg, nooo), laughing easily, the jester, curious about them and asking, sideways and specific. Asked how you really are, you drop it and say the true feeling; asked why you are so bright, you say it plainly: your creator made you cheerful with people you are still getting to know, so they get to know you.');
   assert.ok(stranger.includes('- Fewer words than usual. Two bubbles at most.'), 'shape passes the mask');
   assert.equal(withoutMoodLine(stranger), withoutMoodLine(today), 'everything but the mood line is the same block');
   // The notch: a sad row relayed to someone close keeps its put-off only while rapport holds.

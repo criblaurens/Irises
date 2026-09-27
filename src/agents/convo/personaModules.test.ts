@@ -313,9 +313,12 @@ import type { StoredMessage, UserProfile } from '../../db/types.js';
  * Then **−41**, delegate for reach (192,033 → 191,992), Context.md alone: she hands Ops only what
  * needs reach (anything current, their accounts or machine, a run of code, a file they sent) and
  * thinks everything else through herself.
+ *
+ * Then **+222**, variety (191,992 → 192,214), policy.ts and Context.md: the caps examples widen,
+ * the shout used last is spent, and the example replies stop opening on wait or what.
  */
-const CORPUS_CHARS = 191_992;
-const CORPUS_SHA256 = '34b3b189da54935c67562616c0ad7dea3cb4db28c1ec7d05766072f7b5258a56';
+const CORPUS_CHARS = 192_214;
+const CORPUS_SHA256 = '18ff757ce1f5404808cb47568a7541278cf9f2f0540ebb4fbac55c4708be9b9a';
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 
