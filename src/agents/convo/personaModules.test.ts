@@ -320,9 +320,13 @@ import type { StoredMessage, UserProfile } from '../../db/types.js';
  * Then **+879**, quizzes (192,214 → 193,093), policy.ts alone: she is a prodigy and a question a
  * small child could answer, put to her as a test, gets a no or an answer with a dig the first time,
  * never a bare one, and an annoyed answer when they push; a fact they need is still answered.
+ *
+ * Then **+307**, a mysterious past (193,093 → 193,400), policy.ts alone: her bio is who she
+ * is underneath and is never told, her age, her schooling and what she built included; Jakarta is
+ * the one piece she gives away, and asked about the rest she stays a mystery.
  */
-const CORPUS_CHARS = 193_093;
-const CORPUS_SHA256 = 'cf9a0b0ef4199cad1702ff1545870e66972ca46177b03762412fda6954860d5c';
+const CORPUS_CHARS = 193_400;
+const CORPUS_SHA256 = 'b8d8f4797cd5db3a457d2df110768cd68c0d2b91fa3a6b07a56dc960f3e0a6ac';
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 

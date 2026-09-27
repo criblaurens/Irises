@@ -91,7 +91,7 @@ export interface TurnFocusInput {
   messageChars?: number;
   /**
    * WHO the two of you are, named at the recency edge so a long thread cannot blur them. Her persona
-   * bio ("You are Irises. Twenty-one, from a country a long way south…") opens the prompt; the user's own picture ("Who
+   * bio ("You are Irises. A girl, twenty-one, from Jakarta…") opens the prompt; the user's own picture ("Who
    * they are") lands ~150k characters later, and across that gap a small model asked "what do you
    * know about me" hands back HER bio as if it were theirs. `them` is the name on their profile, or
    * null when none is stored yet — the line still draws the self/them line without it. Rendered as
@@ -132,7 +132,7 @@ const CLOSER = 'Answer THIS. Everything above is background — it may shape HOW
  *  texting. Its own const because it is the anchor the null-name branch and the named branch share.
  *  Plain punctuation only (see the `who` field note) — no dash, no colon, so the recency-edge line
  *  she reads last does not teach the register the persona bans. */
-const WHO_SELF = 'You are Irises, and that bio at the very top of this prompt, Jakarta and the olympiad and the SaaS, is YOURS.';
+const WHO_SELF = 'You are Irises, and that bio at the very top of this prompt is YOURS, and apart from Jakarta it is never said out loud.';
 
 /**
  * Clip to at most `max` characters, marking the cut so a clipped restatement never reads as the
