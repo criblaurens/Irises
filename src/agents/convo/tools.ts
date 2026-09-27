@@ -62,6 +62,10 @@ export const DELEGATE_TO_OPS_TOOL: LlmToolDef = {
         enum: ['read', 'act'],
         description: 'read = look things up / compute / draft for them to send; act = the engine itself would send, post, buy, book, pay, delete, cancel, or change anything of THEIRS — an account, a message, a booking, money. Work the engine does on its own setup so it can do the job is not that: it stays "read" and rides in engine_actions.',
       },
+      quick: {
+        type: 'boolean',
+        description: 'Set true when they are waiting on one current fact, number, reading, or a small calculation that a single credible source or one code run settles; with quick set, your brief asks for that one answer only, with no request for confirming sources, cross-source ranges, or extras. Leave it out when thoroughness is the point: comparisons, research across several sources, their own email or files, or anything they will commit money or plans on.',
+      },
       media_scope: { type: 'string', enum: ['this_turn', 'earlier', 'none'], description: 'Which chat file(s) this look is grounded in: this_turn = the file(s) on this very message (the normal case for a new file); earlier = a file they sent BEFORE this turn that the ask refers back to; none = no file is involved (the default when this message carries none).' },
       meta_prompt: {
         type: 'string',

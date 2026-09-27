@@ -28,6 +28,10 @@ export interface OpsTask {
   // executes (user decision 2026-09-04).
   approval?: { askedAt: number; approvedAt?: number; reconfirm?: boolean };
   metaPrompt?: string;      // Convo-authored instruction for Ops (what's needed + relevant context)
+  // Convo's `quick` flag: they are waiting on one fact a single source settles. Renders one line
+  // above the brief that overrides its confirm-with-a-second-source invitations (ops/client.ts).
+  // ABSENT when unset, so every other task's prompt stays the bytes it was.
+  quick?: true;
   // What the user asked the ENGINE to DO, beyond finding or reading — one entry per action, in the
   // order they asked. `request` distils a single ask, so an ask with two halves ("set this up, then
   // find that") used to arrive with one half gone; this is the half that acts. Its OWN field, like

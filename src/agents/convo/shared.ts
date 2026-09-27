@@ -3492,6 +3492,7 @@ async function dispatchToolCalls(calls: LlmToolCall[], effects: TurnEffects, ctx
         request: opsRequest,
         effect: sideEffect.effect,
         metaPrompt,
+        ...(input.quick === true ? { quick: true as const } : {}),
         ...(engineActions.length ? { engineActions } : {}),
         heldMemory: held.block || undefined,
         memoryHits: held.count,

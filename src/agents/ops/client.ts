@@ -35,6 +35,11 @@ const OUTPUT_CONTRACT = [
   'If you found nothing usable, the ANSWER line must start with exactly "NO RESULT:" followed by one honest sentence about what you tried.',
 ].join('\n');
 
+/** The engine's reading of Convo's `quick` flag (agents/types.ts). Measured 2026-09-27: on quick
+ *  lookups the engine ran 2–3 tool calls and 2.5–6x the output tokens of the bare question because
+ *  the brief asked it to cross-check. Exported for unit tests. */
+export const QUICK_DEPTH_LINE = 'depth: quick — the person is waiting in a live chat. Stop at the first credible source (or one code run) that answers the ask; skip a second source to confirm and skip details beyond what was asked, even where the brief below invites them. One tool call when one will do. A single-source answer is expected here and gets graded single-source in FLAGS; the ANSWER/SOURCE/FLAGS contract still applies.';
+
 /** Build the engine-facing task prompt. Media is NOT inlined here — the adapter maps task.media
  *  itself (inline image blocks where the transport supports them, fetchable URLs otherwise); this
  *  only tells the engine the files exist so it knows to use them. Exported for unit tests.
@@ -112,6 +117,9 @@ export function buildTaskPrompt(task: OpsTask, extras: { now?: number; tz?: stri
     tooling ?? '',
     hints,
     mediaNote,
+    // Above the brief on purpose: the brief is prose and routinely invites a confirming second
+    // source beside its own "quick" cue, and the engine obeys the brief — this line outranks it.
+    task.quick ? QUICK_DEPTH_LINE : '',
     task.metaPrompt ? `Brief from the front-line assistant (your primary instruction):\n${task.metaPrompt}` : '',
     // Directly under the brief, because these are the part of the assignment the brief's prose is
     // least able to enforce: work to be DONE, in an order, each owing a report back.
