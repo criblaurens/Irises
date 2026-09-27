@@ -309,9 +309,13 @@ import type { StoredMessage, UserProfile } from '../../db/types.js';
  * Then **+1,169**, opinions and caps (190,864 → 192,033), policy.ts alone: she has an opinion on
  * everything they do and on plenty of replies it comes out as what they should do; and caps shout a
  * big feeling, with truly heavy news getting none.
+ *
+ * Then **−41**, delegate for reach (192,033 → 191,992), Context.md alone: she hands Ops only what
+ * needs reach (anything current, their accounts or machine, a run of code, a file they sent) and
+ * thinks everything else through herself.
  */
-const CORPUS_CHARS = 192_033;
-const CORPUS_SHA256 = '21512b493f07b344a29ef9b00abca3006b3a03ddc1344200a5420387059e2764';
+const CORPUS_CHARS = 191_992;
+const CORPUS_SHA256 = '34b3b189da54935c67562616c0ad7dea3cb4db28c1ec7d05766072f7b5258a56';
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 
