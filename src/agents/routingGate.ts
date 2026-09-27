@@ -1,9 +1,9 @@
 // Routing floor. Convo decides on its own whether to delegate to Ops; when it answers a data
 // question ITSELF from general knowledge (no delegation), that answer bypasses Ops' grounding
-// backstop entirely — the one fabrication path nothing else catches ("anything from the MLS this
-// week?" → invented). needsGrounding is a conservative, high-precision regex screen that flags the
-// messages which MUST run through Ops. 'maybe' is reserved for a future bounded-classify tier; the
-// first cut only forces on a confident 'yes' (over-delegation costs a round-trip, so we stay strict).
+// backstop entirely — the one fabrication path nothing else catches. Whether a message needs reach
+// she lacks is judged by a model (convo/reachClassify.ts), because wording is no guide to it and a
+// word list read one language only. needsGrounding keeps the two signals that read STRUCTURE, not
+// wording, and so need no judge: a link, and a filesystem path with an ask around it.
 
 // Type-only (erased at runtime): this module stays dependency-free so the gate's regexes can be
 // unit-tested without dragging the engine adapters into the process. The one runtime import is
@@ -17,65 +17,14 @@ export type GroundingNeed = 'yes' | 'no' | 'maybe';
 // general knowledge) — the domain-neutral analogue of the old street-address short-circuit.
 const URL_RE = /\bhttps?:\/\/\S+|\bwww\.\S+\.\S+/i;
 
-// The inspection verbs, shared by the two path/file screens below. A weak Convo model aimed at one
+// The inspection verbs the path screen's ask reads. A weak Convo model aimed at one
 // of these either guesses at what it would have found or falsely refuses ("that's local to your
 // machine") — the engine runs ON that machine and has the file tools, so both are wrong answers.
 const INSPECT = String.raw`(?:check|peek|look|list|read|show|open|browse|inspect|scan|ls)`;
-// The window between the verb and its target: up to four plain words. Nothing may intervene but
-// words — punctuation straight after the verb ends the match, which is what keeps "look, i already
-// told them" and "check, that's fine" out.
-const NEAR = String.raw`(?:\s+\S+){0,4}\s+`;
-
-// Data-lookup phrasings that need a real source (the user's own email/records, or the live web)
-// rather than the model's general knowledge — the fabrication surface the gate exists to close.
-const STRONG: RegExp[] = [
-  // Explicit retrieval verbs — "look it up", "find X", "search for", "pull up", "check my …".
-  /\b(look\s+(?:it|this|that|them|up)|look up|pull up|pull the|search (?:for|up|my|the|through)|find (?:me |the |my |an? )?\S|check (?:my|the|on)|dig up|track down)\b/i,
-  // An inspection verb aimed at a concrete PATH — "check ~/.hermes/skills", "peek at ./src",
-  // "ls /var/log/nginx". Imperative, so it needs no question mark to count.
-  new RegExp(String.raw`\b${INSPECT}\b${NEAR}(?:~\/|\.{1,2}\/|\/[\w.-]+\/)`, 'i'),
-  // …or at files/folders on disk — "peek at what skill folders exist", "look in my downloads
-  // folder", "list the files in there". Reading a directory is engine work, never recall.
-  // Plural "files" only: a SINGULAR "read this file" is almost always the attachment they just sent,
-  // and that turn belongs to delegate_to_ops with the media riding along — not to a forced,
-  // file-less general delegation. ("check my files" is already caught by the retrieval verbs above.)
-  new RegExp(String.raw`\b${INSPECT}\b${NEAR}(?:files|filenames?|folders?|subfolders?|directory|directories|dirs?)\b`, 'i'),
-  // References to the user's OWN connected data (their inbox / email / messages / calendar /
-  // account). "gmail" stays: it's the user's own vocabulary for their inbox, still a correct
-  // delegation trigger even though the engine owns the account access.
-  /\b(my|the)\s+(inbox|email|emails|gmail|messages?|calendar|schedule|account|order|invoice|subscription)\b/i,
-  // Retrieval-history questions answerable only from their records ("did I get X", "has Y replied").
-  /\b(did (?:i|we)\b|has\b[^?]*\b(responded|replied|sent|arrived)|when did (?:i|we)\b)\b/i,
-  /\b(what'?s|what is)\s+(the\s+)?(status|latest|current|newest|price|cost|balance|total|value)\b/i,
-];
-
-// Live/current quantitative asks — a real figure, not a definition. A figure needs a source only
-// when it lives outside the message and outside her: in the world, or in their records. One she can
-// work out from the words in front of her (the letters of a word they gave, arithmetic on numbers
-// they stated) or one about herself and them is hers to answer, and forcing it out threw away a
-// correct reply for an engine run.
-const QUANTITY_ASK = /\b(how much|how many)\b/i;
-const SELF_CONTAINED_QUANTITY = new RegExp([
-  // Counting inside a word or phrase they gave: a letter, letters, vowels, words, syllables, digits.
-  String.raw`\bhow many\s+(?:["'“]?[a-z]["'”]?(?:'?s)?|letters?|characters?|chars?|vowels?|consonants?|syllables?|words?|digits?)\s+(?:are\s+|is\s+)?(?:in|does|do)\b`,
-  // Arithmetic on numbers they stated.
-  String.raw`\bhow (?:much|many) (?:is|are)\s+\d[\d.,\s]*(?:[-+*/x×÷^%]|plus|minus|times|divided by)`,
-  // About her and them: "you" asked about "me"/"us" in the same clause.
-  String.raw`\bhow (?:much|many)\b[^?.!]*\b(?:u|you|ya)\b[^?.!]*\b(?:me|us)\b`,
-].join('|'), 'i');
-
-// A factual question about a NAMED entity (a proper noun that isn't the sentence-initial word) —
-// the shape a model will confidently fabricate an answer to. Two signals AND'd: a question word,
-// plus a capitalized proper noun sitting after another word (so the leading "What"/"Who" alone
-// doesn't trip it, which keeps definitional "What is recursion?" out).
-const QUESTION_WORD = /\b(who|whose|where|which|when|what)\b/i;
-const PROPER_NOUN = /\w\s([A-Z][a-z]{2,})/;
-
 // A concrete filesystem path the user NAMED — "~/.hermes/skills", "/var/log/nginx", "./src". The
 // domain-neutral analogue of the URL rule: someone who types a real path wants it READ, and only the
-// engine (which runs on that machine, with the file tools) can read it. Two signals AND'd, same
-// shape as the named-entity screen above, so a path mentioned in passing ("i dropped it in
-// ~/Documents yesterday") stays local.
+// engine (which runs on that machine, with the file tools) can read it. Two signals AND'd, so a
+// path mentioned in passing ("i dropped it in ~/Documents yesterday") stays local.
 // Precision: the token must START a word (whitespace / quote / bracket / message start), so
 // "and/or", "read/write", "8/22" and "50/50" can't look like paths; an absolute path needs TWO
 // segments, so a stray "/" or a slash-command ("/help") isn't one.
@@ -83,27 +32,11 @@ const PATH_TOKEN = /(?:^|[\s"'`([])(?:~\/[\w.-]+|\.{1,2}\/[\w.-]+|\/[\w.-]+\/[\w
 // The ask wrapped around that path: a question, a "can you", a please, or an inspection/naming verb.
 const PATH_ASK = new RegExp(String.raw`\?|\b(?:can|could|would|will|do) (?:you|u|ya)\b|\bplease\b|\b(?:${INSPECT}|cat|name|tell me|what|which|where|any)\b`, 'i');
 
-// Leading conversational acks must not shield a data question from the gate: "ok What/when did I
-// sell the Martinezes" is a lookup with a throat-clear in front, not a greeting. Stripped (possibly
-// repeatedly: "ok cool, who owns …") before classification; a message that is NOTHING but acks
-// stays social. Only bare acknowledgment words — not steering words like "no"/"wait"/"actually".
-const ACK_PREFIX = /^(?:(?:ok(?:ay)?|kk?|cool|nice|got it|gotcha|thanks|thank you|thx|ty|yeah|yep|yes|sure|alright|right|oh|hey|hi|hello)\b[\s,.!-]*)+/i;
-
-// Definitional / arithmetic / social — answered locally; never force these to Ops (unless a URL
-// rides along, which flips it back to a lookup).
-const NEGATIVE = /^(?:\s*)(?:hi|hey|hello|thanks|thank you|ok|okay|got it|cool|nice)\b|\b(what does|what is (?:a|an|the term)|explain|means?\b|how do i|difference between|define)\b/i;
-
 export function needsGrounding(text: string): GroundingNeed {
   const t = (text || '').trim();
   if (t.length < 4) return 'no';
-  if (URL_RE.test(t)) return 'yes';                 // a link to read always wins
-  const core = t.replace(ACK_PREFIX, '').trim();
-  if (core.length < 4) return 'no';                 // the message WAS just the ack/greeting
-  if (NEGATIVE.test(core)) return 'no';             // terminology/math/greeting
-  for (const re of STRONG) if (re.test(core)) return 'yes';
-  if (QUANTITY_ASK.test(core) && !SELF_CONTAINED_QUANTITY.test(core)) return 'yes';
-  if (QUESTION_WORD.test(core) && PROPER_NOUN.test(core)) return 'yes'; // "who is X at <Named>?"
-  if (PATH_TOKEN.test(core) && PATH_ASK.test(core)) return 'yes';       // "what's in ~/.hermes/skills?"
+  if (URL_RE.test(t)) return 'yes';                                  // a link to read always wins
+  if (PATH_TOKEN.test(t) && PATH_ASK.test(t)) return 'yes';          // "what's in ~/.hermes/skills?"
   return 'no';
 }
 

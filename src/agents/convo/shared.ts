@@ -62,8 +62,9 @@ import {
 } from '../../state/opsCoordination.js';
 import { steerWithRetry } from '../ops/steer.js';
 import { etaStatus, estimateOpsEta } from '../etaEstimate.js';
+import { turnNeedsReach } from './reachClassify.js';
 import {
-  needsGrounding, salvageHoldingText, refusedCapabilities,
+  salvageHoldingText, refusedCapabilities,
   holdsTheAnswer, heldMemoryBrief, heldMemoryCount, routingGateHitReceipt,
   routingGateMemoryAwareEnabled, type RoutingGateDecision,
 } from '../routingGate.js';
@@ -4465,7 +4466,11 @@ export async function processConvoResult(args: {
     // happens only on a grounded ask nothing is already answering.
     let decision: RoutingGateDecision;
     let salvagedDraft = false;
-    if (needsGrounding(lastUser) !== 'yes') {
+    // Does this turn need reach she lacks? A link or a path says so outright; otherwise the reach
+    // judge decides (convo/reachClassify.ts), warmed at the door so its verdict is already here.
+    // Anything short of a confident `reach` is her call, and the gate stands down.
+    const reach = await turnNeedsReach({ chatId, handle }, lastUser);
+    if (!reach.needs) {
       decision = 'not_needed';
     } else if (alreadyRunning || isDuplicateDelegation(chatId, 'general', lastUser) === 'in_flight') {
       decision = 'skipped_in_flight';
@@ -4524,7 +4529,7 @@ export async function processConvoResult(args: {
     // and did not have, and it is what makes the flag measurable before it is trusted.
     record({
       type: 'event', label: 'convo:routing_gate', chatId, handle,
-      detail: { decision, ...routingGateHitReceipt(turnHits), salvaged: salvagedDraft },
+      detail: { decision, reach: reach.reach, ...routingGateHitReceipt(turnHits), salvaged: salvagedDraft },
     });
   }
 

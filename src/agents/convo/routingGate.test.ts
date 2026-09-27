@@ -17,13 +17,14 @@
 
 process.env.DATA_BACKEND = 'memory';
 
-import { test } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { processConvoResult, type ChatContext } from './shared.js';
 import { chat } from './client.js';
 import { addImportantNote } from '../../db/repositories/memoryMedium.js';
 import { ROUTING_GATE_DECISIONS } from '../routingGate.js';
+import { setReachJudgeForTests } from './reachClassify.js';
 import { buildTurnRelevance, threadHit, type TurnRelevance } from '../../memory/relevance.js';
 import { emptyMedia } from '../../webhook/types.js';
 import { __resetOpsCoordination, markOpsStart } from '../../state/opsCoordination.js';
@@ -33,7 +34,13 @@ import { resetEngineBackendCache, type EngineBackend } from '../ops/engineBacken
 import type { LlmResult, LlmToolCall } from '../../llm/types.js';
 import type { TurnTraceTurnInputs } from '../../diagnostics/turnTrace.js';
 
-// The live turn, verbatim. `needsGrounding` reads it 'yes' on "how many".
+// Every ask in this file needs reach except the one thank-you, and the judge says so; what is under
+// test is what the gate does with the verdict (convo/reachClassify.ts decides the question itself).
+const NO_REACH = 'thanks, that helps a lot';
+before(() => setReachJudgeForTests(t => (t === NO_REACH ? 'none' : 'reach')));
+after(() => setReachJudgeForTests(null));
+
+// The live turn, verbatim.
 const ASK = "how many days till dana's wedding again";
 // Convo's own parsed reply from that turn.
 const ANSWER = ['39 days', "oct 12, you're doing the toast"];
@@ -229,13 +236,14 @@ test('CONVO_ROUTING_GATE_MEMORY_AWARE=off puts the text-only gate back', async (
 
 test('a message that needs no grounding still leaves a receipt', async () => {
   const out = await processConvoResult({
-    ...args('thanks, that helps a lot'),
+    ...args(NO_REACH),
     res: makeResult(['anytime']),
-    relevance: relevance('thanks, that helps a lot', { notes: [NOTE] }),
+    relevance: relevance(NO_REACH, { notes: [NOTE] }),
   });
   assert.ok(!out.delegatedTask);
   assert.equal(out.text, 'anytime');
   assert.equal(gateReceipt().decision, 'not_needed');
+  assert.equal(gateReceipt().reach, 'none', 'the receipt says why the gate stood down');
 });
 
 test('the same ask already running leaves its own receipt, and is never stacked on', async () => {

@@ -7,70 +7,24 @@ import {
   OPS_HELD_BLOCK_CHARS,
 } from './routingGate.js';
 
-test('data-lookup questions require grounding (route to Ops)', () => {
-  for (const q of [
-    'look up the population of Tokyo',
-    'who is the CEO of Stripe?',
-    "what's the status of my order?",
-    'check my inbox for the invoice',
-    'did I get a reply from the bank?',
-    'when did we last hear from Acme?',
-    'how much does a Model 3 cost?',
-    'find the email from Sarah',
-    'pull up my calendar for tomorrow',
-    'has the vendor responded yet?',
-  ]) {
-    assert.equal(needsGrounding(q), 'yes', `expected yes for: ${q}`);
-  }
+// needsGrounding reads STRUCTURE only: a link, or a named path with an ask around it. Whether any
+// other message needs reach is the reach judge's call (convo/reachClassify.ts), never a word list.
+test('a link is always grounded, whatever else the message says', () => {
+  assert.equal(needsGrounding('what does this page say? https://example.com/article'), 'yes');
+  assert.equal(needsGrounding('lol www.example.com/thing'), 'yes');
 });
 
-test('a leading ack must not shield a data question from the gate', () => {
-  for (const q of [
-    'ok look up the weather in Paris',
-    'thanks! check my inbox for the invoice',
-    'cool, how much does a Model 3 cost?',
-    'ok cool — find the email from Sarah',
-  ]) {
-    assert.equal(needsGrounding(q), 'yes', `expected yes for: ${q}`);
-  }
-  // ...while a message that IS just the ack (or ack + social) stays local.
-  for (const q of ['ok', 'ok cool', 'thanks!!', 'yes', 'ok, what does API mean?']) {
-    assert.equal(needsGrounding(q), 'no', `expected no for: ${q}`);
-  }
-});
-
-test('terminology / math / social are answered locally (no forced delegation)', () => {
-  for (const q of [
-    'what does API mean?',
-    'what is a closure?',
-    'explain how promises work',
-    'thanks!',
-    'hey, how are you?',
-    "what's the difference between let and const?",
-    'what is recursion?',
-  ]) {
-    assert.equal(needsGrounding(q), 'no', `expected no for: ${q}`);
-  }
-});
-
-test('a figure she can work out from the message, or one about her and them, stays hers', () => {
+test('wording alone never grounds a message: that is the judge\'s question', () => {
   for (const q of [
     'how many r in strawberries',
-    "how many r's are in strawberry?",
-    'how many letters in mississippi',
-    'how much is 15% of 80',
-    'how much do u know me 1-100? how much do u comfortable with me',
+    'look up the population of Tokyo',
+    'who is the CEO of Stripe?',
+    'check my inbox for the invoice',
+    'harga bitcoin sekarang berapa',
+    'ok',
   ]) {
     assert.equal(needsGrounding(q), 'no', `expected no for: ${q}`);
   }
-  // ...while a figure that lives in the world or in their records still goes out.
-  for (const q of ["how many days till dana's wedding again", 'how many people live in jakarta', 'how much is a flight to bali']) {
-    assert.equal(needsGrounding(q), 'yes', `expected yes for: ${q}`);
-  }
-});
-
-test('a URL flips even an otherwise-definitional message to grounded', () => {
-  assert.equal(needsGrounding('what does this page say? https://example.com/article'), 'yes');
 });
 
 // ── The local-path regression (2026-08-22 live test, weak model) ────────────────────────────────
@@ -83,19 +37,12 @@ test('a named filesystem path in a request is engine work, never recall', () => 
   for (const q of [
     'can you peek at what skill folders exist in my ~/.hermes/skills and name like 5 of them?',
     'seriously tho, can you actually check ~/.hermes/skills and tell me some folder names in there?',
-    'whats the latest nodejs LTS version right now? can you look it up for me', // already passed; pinned
     'check ~/.hermes/skills',            // imperative, no question mark
     'ls ~/.hermes/skills',
     'peek at ./src and tell me whats there',
     'whats in /var/log/nginx?',
     'tail /var/log/foo please',
   ]) {
-    assert.equal(needsGrounding(q), 'yes', `expected yes for: ${q}`);
-  }
-});
-
-test('an inspection verb aimed at files/folders is engine work too', () => {
-  for (const q of ['look in my downloads folder', 'list the files in there', 'peek at what folders are on disk']) {
     assert.equal(needsGrounding(q), 'yes', `expected yes for: ${q}`);
   }
 });

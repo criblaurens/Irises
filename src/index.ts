@@ -44,6 +44,7 @@ import { typingDelayMs as pacedTypingDelayMs, holdLoop, type PacingConfig } from
 import { createTypingLifecycle } from './state/typingStop.js';
 import { mergeBurst, splitBurstBySender } from './state/burstMerge.js';
 import { warmIdleClassify } from './agents/convo/idleClassify.js';
+import { warmReachClassify } from './agents/convo/reachClassify.js';
 import { classifyNeeded } from './persona/idle.js';
 import { hooksEnabled, shareTurnsEnabled } from './persona/featureFlags.js';
 import { resolveOutboundBubbles, resolveReactionTarget, stripReplyTag } from './state/replyThreading.js';
@@ -1124,6 +1125,10 @@ export function enqueueInbound(
       }, { shareTurns: shareTurnsEnabled(), takeTurns: shareTurnsEnabled() })) {
     warmIdleClassify({ chatId, handle: from }, burstText);
   }
+  // The reach judge reads every burst, not just the idle-shaped ones: the long, detailed ask the idle
+  // gate skips is the one most likely to need reach. Warmed here so the verdict lands during the
+  // settle, before the early-emit pre-check and the routing gate read it (convo/reachClassify.ts).
+  if (burstText) warmReachClassify({ chatId, handle: from }, burstText);
 
   // Index this inbound message's id → text so a LATER tapped reply that the transport collapses to
   // the thread root (this user's own message) resolves to what they said. Sits HERE, in the single

@@ -56,7 +56,7 @@ import {
   buildSystemPromptSections, processConvoResult, formatHistory, emptyExtras, callConvoLLM, annotateTappedReply,
   parkedApprovalStanding, withOnScreenNote, type ConvoStreamCommit,
 } from './shared.js';
-import { needsGrounding } from '../routingGate.js';
+import { reachFlagged, warmReachClassify } from './reachClassify.js';
 import { createEnvelopeStream } from '../../pipeline/envelopeStream.js';
 import { BUBBLE_HARD_CAP } from '../../pipeline/bubbleJson.js';
 import {
@@ -852,12 +852,16 @@ export async function chat(
   // (no freshness read: that can only stand the gate down, never make it fire), the chat and turn
   // shape, and the parked-approval read started beside the memory batch. Nothing new is awaited in
   // front of the call but that read, which has long since landed. A caller with no sink never arms.
+  // Warm the reach judge on THIS text (a no-op when the door already did): a voice-memo transcript
+  // or a remerged burst is a different string from the one the door saw, and the gate below needs
+  // its verdict by the time the Convo call returns.
+  warmReachClassify({ chatId, handle }, textToSend);
   const earlySend = chatContext?.earlySend;
   const early = earlySend && streamArmed({
     enabled: streamOn,
     hasParkedApproval: await parkedRead,
     hookMode: hookDirective?.mode,
-    groundingFlagged: needsGrounding(textToSend) === 'yes',
+    groundingFlagged: reachFlagged(textToSend),
     isGroupChat,
     introOrFirstMove: !!introWeave,
     isBurst: (chatContext?.burstManifest?.length ?? 1) > 1,
