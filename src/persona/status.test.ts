@@ -31,6 +31,7 @@ const RAW_V2 = {
   hook_kind: 'judgment',
   language_request: 'English',
   turned_down: 'later: the long essay outline',
+  dodged: 'plain',
   thread_note: 'loop: the visa interview, around thursday', thread_outcome: 'took',
 };
 
@@ -39,7 +40,7 @@ const RAW_V2 = {
  *  the persisted row has to stay narrow for — a default on any of these four would write a dead key
  *  (or, for `hook_kind`, a beat the kill switch counts) onto every silent turn. */
 const RAW_V2_FLAT = {
-  ...RAW_V2, hook_kind: null, language_request: null, turned_down: null, thread_note: null, thread_outcome: null,
+  ...RAW_V2, hook_kind: null, language_request: null, turned_down: null, dodged: null, thread_note: null, thread_outcome: null,
 };
 
 /** The SAME turn as the v1 envelope wrote it — which is also the shape of every `affect_state` row
@@ -110,7 +111,7 @@ test('a v1 envelope loads with its dead keys ignored and its judgments intact', 
   // Every key the table lists EXCEPT the two a v1 envelope could not carry — the standing setting
   // and the beat the reply carried: an absent value is exactly the nullable "not this turn", and
   // coerceStatus never invents one.
-  const V1_CANNOT_CARRY = ['hook_kind', 'language_request', 'turned_down'];
+  const V1_CANNOT_CARRY = ['hook_kind', 'language_request', 'turned_down', 'dodged'];
   assert.deepEqual(Object.keys(s), ENVELOPE_FIELDS.map(f => f.key).filter(k => !V1_CANNOT_CARRY.includes(k)));
   assert.equal(s.mood_label, 'hopeful');
   assert.equal(s.intent_mode, 'sharing_update');
@@ -497,7 +498,7 @@ test('STATUS_SCHEMA_PROP is a flat, nullable, strict object', () => {
   const p = STATUS_SCHEMA_PROP as { type: string[]; additionalProperties: boolean; required: string[]; properties: Record<string, unknown> };
   assert.deepEqual(p.type, ['object', 'null']);        // nullable so a weak model can opt out
   assert.equal(p.additionalProperties, false);
-  assert.equal(p.required.length, 11);                 // v2: was 17, then +1 for the standing setting, +1 for the hook, +1 for a mood's no
+  assert.equal(p.required.length, 12);                 // v2: was 17, then +1 for the standing setting, +1 for the hook, +1 for a mood's no, +1 for a dodge
   assert.ok('mood_label' in p.properties && 'meta_prompt' in p.properties && 'terminal_closure' in p.properties);
   // The threading fields ride the same envelope (zero extra LLM calls) and stay LAST in both lists.
   assert.deepEqual(p.required.slice(-2), ['thread_note', 'thread_outcome']);
@@ -550,7 +551,7 @@ const SCHEMA_V2 = {
   type: ['object', 'null'],
   additionalProperties: false,
   required: [
-    "mood_label", "mood_shift", "intent_mode", "terminal_closure", "epistemic_trigger", "meta_prompt", "hook_kind", "language_request", "turned_down", "thread_note", "thread_outcome",
+    "mood_label", "mood_shift", "intent_mode", "terminal_closure", "epistemic_trigger", "meta_prompt", "hook_kind", "language_request", "turned_down", "dodged", "thread_note", "thread_outcome"
   ],
   properties: {
     mood_label: { type: "string", description: "one feeling word for how you actually are right now, from the vocabulary below (e.g. hopeful, drained, content, anxious); when your weather says what you feel underneath, the word fits it" },
@@ -562,8 +563,9 @@ const SCHEMA_V2 = {
     hook_kind: { type: ["string", "null"], description: "null on a flat task answer or a quiet reply; otherwise the one move this reply carried — one of: judgment | callback | tangent | question. A question outranks the others when the reply carried one. Only a share turn opens a question; a question on any other turn is a slip you still report." },
     language_request: { type: ["string", "null"], description: "null unless they explicitly asked you, THIS turn, to reply in a language from now on — then that language named in English (e.g. \"English\", \"Indonesian\"). A message merely written in a language is never an ask." },
     turned_down: { type: ["string", "null"], description: "null most turns. Set only when your mood had a say on their ask and used it: \"later: <their ask, in a few words>\" when you put it off and it stays owed, or \"no: <their ask, in a few words>\" when you refused it outright. Never set on anything your mood gets no say on (a fact or number they asked for, anything with a clock on it, a reminder or watch they set up, fixing your own mistake, their safety), and never on a thing you actually did." },
+    dodged: { type: ["string", "null"], description: "whether their message dodged something your LAST reply asked of them, a detail, an answer, the rest of what they started, in any shape: plain (they declined or deflected it: a nothing, a never mind, a long story) | shut (they bristled, told you to drop it, or it is clearly tender for them). A laugh, a yeah or an ok after a reply that asked them nothing is no dodge. Read it from their message alone. Otherwise null." },
     thread_note: { type: ["string", "null"], description: "null most turns. Three uses, one per turn, prefixed: (1) \"loop: <thing>\" — something pending in their life with a how-did-it-go attached (an interview, a surgery, a launch, a dreaded talk), in their own word for it; one mention is enough. Catch a loop even on a venting or overwhelmed turn — a loop is asked about later, never in the moment. (2) \"resolved: <thing>\" — a pending thing you were tracking just got its outcome, whatever it was. (3) a recurring theme of theirs as \"kind: theme\", kind one of value | tension | goal | phrase (e.g. \"tension: speed vs craft\"); only for things likely to recur, never something they merely CLAIM is a pattern. A loop is an unanswered outcome and a theme is a because — neither is ever a bare fact (\"has a meeting friday\" belongs to your memory tools, not here). Precedence when more than one fits: \"resolved:\" > \"loop:\" > theme — a resolution outranks a pending loop, a pending loop outranks a fresh theme, one note per turn." },
-    thread_outcome: { type: ["string", "null"], description: "only when your LAST reply tagged a standing thread, asked about something pending of theirs, or asked them a follow-up question: how they just took it — one of: took (they picked it up) | passed (they let it lie, fine) | pushed_back (they corrected it or bristled). Read it from their message alone, never from hope — a pass reported as a take poisons the thread. Otherwise null, including when you were offered a thread and chose not to use it." },
+    thread_outcome: { type: ["string", "null"], description: "only when your LAST reply tagged a standing thread, asked about something pending of theirs, or asked them a follow-up question: how they just took it — one of: took (they picked it up) | passed (they let it lie, fine) | pushed_back (they corrected it, bristled, or it is clearly tender for them). Read it from their message alone, never from hope — a pass reported as a take poisons the thread. Otherwise null, including when you were offered a thread and chose not to use it." },
   },
 };
 

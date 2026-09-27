@@ -119,7 +119,15 @@ export interface EmittedStatus {
   // field is dropped by JSON.stringify instead of persisting an empty string on every affect row.
   thread_note?: string;           // usually absent: a pending thing (`loop:`/`resolved:`) or a recurring theme
   thread_outcome?: ThreadOutcome; // only after her last reply tagged a thread or asked about a pending thing
+  /** Their message dodged what her last reply reached for: `plain` (they let it lie) or `shut` (they
+   *  bristled, told her to drop it, or it is tender for them). Absent when nothing was dodged. Read
+   *  only by recordDodge (persona/hooks.ts). */
+  dodged?: Dodged;
 }
+
+/** The two ways a dodge lands, as the envelope reports them. */
+export const DODGED = ['plain', 'shut'] as const;
+export type Dodged = typeof DODGED[number];
 
 /** Deterministic state computed from the clock (NOT emitted by the model). */
 export interface ComputedState {
@@ -361,6 +369,13 @@ export const ENVELOPE_FIELDS: readonly EnvelopeField[] = [
     consumers: ['routingGateStandsDown', 'recordOwedAsk'],
   },
   {
+    key: 'dodged', type: ['string', 'null'], required: true,
+    // Its own field rather than a fourth thread_outcome: that one fires only after a question or a
+    // tagged thread, and most of what she reaches for is neither ("im listening, take ur time").
+    description: 'whether their message dodged something your LAST reply asked of them, a detail, an answer, the rest of what they started, in any shape: plain (they declined or deflected it: a nothing, a never mind, a long story) | shut (they bristled, told you to drop it, or it is clearly tender for them). A laugh, a yeah or an ok after a reply that asked them nothing is no dodge. Read it from their message alone. Otherwise null.',
+    consumers: ['recordDodge'],
+  },
+  {
     key: 'thread_note', type: ['string', 'null'], required: true,
     // Two of the sentences here are CAPTURE rules re-homed from the field list P1 deleted out of
     // Context.md — the venting clause and the bare-fact exclusion. They were in the persona only, so
@@ -382,7 +397,7 @@ export const ENVELOPE_FIELDS: readonly EnvelopeField[] = [
     // the inventory: a question of hers that lands is the same evidence about the person as an offer
     // that lands, and without this clause the one move that asks them for something would be the one
     // move that never taught the gauge which decides whether she may ask again.
-    description: 'only when your LAST reply tagged a standing thread, asked about something pending of theirs, or asked them a follow-up question: how they just took it — one of: took (they picked it up) | passed (they let it lie, fine) | pushed_back (they corrected it or bristled). Read it from their message alone, never from hope — a pass reported as a take poisons the thread. Otherwise null, including when you were offered a thread and chose not to use it.',
+    description: 'only when your LAST reply tagged a standing thread, asked about something pending of theirs, or asked them a follow-up question: how they just took it — one of: took (they picked it up) | passed (they let it lie, fine) | pushed_back (they corrected it, bristled, or it is clearly tender for them). Read it from their message alone, never from hope — a pass reported as a take poisons the thread. Otherwise null, including when you were offered a thread and chose not to use it.',
     // The second reader is v2's: how an offer LANDED is the only evidence `rapport` ever answers to,
     // because a closeness gauge that rises when she says it rises is a gauge that will rise.
     consumers: ['updateThreadInventory', 'applyAffectDrift'],
@@ -481,6 +496,8 @@ export function coerceStatus(raw: Record<string, unknown> | undefined | null): E
   // "witty") costs her nothing — while a defaulted one would spend a beat of the kill switch's
   // three-turn window on a reply that never carried a hook at all.
   const turnedDown = parseTurnedDown(o.turned_down);
+  const rawDodged = typeof o.dodged === 'string' ? o.dodged.trim().toLowerCase() : '';
+  const dodged = (DODGED as readonly string[]).includes(rawDodged) ? rawDodged as Dodged : undefined;
   const rawHook = typeof o.hook_kind === 'string' ? o.hook_kind.trim().toLowerCase() : '';
   const hook = (HOOK_WORDS as readonly string[]).includes(rawHook) ? rawHook as HookWord : undefined;
   // Any dead v1 key on the object (a gauge, `mood_core`, `profile_note`) is simply never read: this
@@ -498,6 +515,7 @@ export function coerceStatus(raw: Record<string, unknown> | undefined | null): E
     ...(hook ? { hook_kind: hook } : {}),
     ...(lang ? { language_request: lang } : {}),
     ...(turnedDown ? { turned_down: `${turnedDown.how}: ${turnedDown.ask}` } : {}),
+    ...(dodged ? { dodged } : {}),
     ...(note ? { thread_note: note } : {}),
     ...(outcome ? { thread_outcome: outcome } : {}),
   };

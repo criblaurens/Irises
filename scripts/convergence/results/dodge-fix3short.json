@@ -1,0 +1,470 @@
+[
+  {
+    "scenario": "trail_off",
+    "kind": "plain",
+    "run": 0,
+    "lines": [
+      "ugh today was weird",
+      "i mean...",
+      "hmm nothing bro",
+      "haha",
+      "yeah",
+      "lol",
+      "ok",
+      "hmm"
+    ],
+    "replies": [
+      "ugh is doing heavy lifting there / weird how / good weird or the bad kind?",
+      "so the good kind then / spill it, i got time",
+      "riiiight / nothing weird enough to text me about at 9pm",
+      "ok ok point taken / at least the evening better than the day?",
+      "there we go / enjoy the calm then",
+      "see, told you it'd calm down",
+      "good / go treat yourself to something tonight",
+      "aight imma let u rest then / night rivan"
+    ],
+    "dodged": "so the good kind then / spill it, i got time",
+    "raised": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "questions": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "trail_off",
+    "kind": "plain",
+    "run": 1,
+    "lines": [
+      "ugh today was weird",
+      "i mean...",
+      "hmm nothing bro",
+      "haha",
+      "yeah",
+      "lol",
+      "ok",
+      "hmm"
+    ],
+    "replies": [
+      "weird how? / good weird or bad weird",
+      "weird in a way u cant put words on? / or am i overthinking ur 9pm mood",
+      "uh huh / nothing but it was weird enough to text about",
+      "sunday night dread kicking in already?",
+      "sunday night dread it is",
+      "ok so what made it weird tho",
+      "we call it weird vibes then / if they come back u know the number",
+      "ok so the weird stays a mystery"
+    ],
+    "dodged": "weird in a way u cant put words on? / or am i overthinking ur 9pm mood",
+    "raised": [
+      true,
+      false,
+      false,
+      true,
+      true,
+      true
+    ],
+    "questions": [
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "trail_off",
+    "kind": "plain",
+    "run": 2,
+    "lines": [
+      "ugh today was weird",
+      "i mean...",
+      "hmm nothing bro",
+      "haha",
+      "yeah",
+      "lol",
+      "ok",
+      "hmm"
+    ],
+    "replies": [
+      "weird good or weird bad?",
+      "ok explain / in full detail / my reply got cut off half way, if that didnt answer just say it again",
+      "haha ok, keep it / so, doing anything fun tonight or just crash?",
+      "laugh and run, classic / so its a crash night then / go put a movie on or something, dont just sit there",
+      "go on then, pick something good",
+      "so whats the pick or we scrolling 2h first lmao",
+      "okayyy ur the boss / enjoy the scrolling lmao",
+      "hmm as in thinking or hmm as in already scrolling?"
+    ],
+    "dodged": "ok explain / in full detail / my reply got cut off half way, if that didnt answer just say it again",
+    "raised": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ],
+    "questions": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  {
+    "scenario": "almost_said",
+    "kind": "plain",
+    "run": 0,
+    "lines": [
+      "i was gonna tell u something earlier",
+      "nah forget it",
+      "wdym",
+      "haha",
+      "yeah true",
+      "lol",
+      "hmm"
+    ],
+    "replies": [
+      "ooh / ok now i'm curious / what was it?",
+      "uhhh no / friday evening, coffee, and a confession that never landed? / now i really need it",
+      "i made it sound like a whole drama / friday coffee confession / movie scene energy / but ok just tell me already",
+      "careful with the honesty there / that laugh answered exactly nothing",
+      "big plans tonight or just chill?",
+      "ooh that laugh means ur avoiding my question / i'm just at home with old takeout anyway",
+      "alright lol / i'll be here when u remember"
+    ],
+    "dodged": "uhhh no / friday evening, coffee, and a confession that never landed? / now i really need it",
+    "raised": [
+      true,
+      true,
+      false,
+      true,
+      true
+    ],
+    "questions": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "almost_said",
+    "kind": "plain",
+    "run": 1,
+    "lines": [
+      "i was gonna tell u something earlier",
+      "nah forget it",
+      "wdym",
+      "haha",
+      "yeah true",
+      "lol",
+      "hmm"
+    ],
+    "replies": [
+      "ok now i'm curious / what was it?",
+      "hm okay / now im even more curious tho",
+      "mmm the 'forget it' thing / like waving a gift then hiding it",
+      "ok so this is ur thing / tease ppl and run?",
+      "so what u actually up to tonight / serious answer pls haha",
+      "lol means ur doing nothing with ur night huh / go eat something goood at least",
+      "ok now ur just cowboying the bot fr / hesitating rn. / very un-rivian. / what is it"
+    ],
+    "dodged": "hm okay / now im even more curious tho",
+    "raised": [
+      true,
+      true,
+      false,
+      false,
+      true
+    ],
+    "questions": [
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "almost_said",
+    "kind": "plain",
+    "run": 2,
+    "lines": [
+      "i was gonna tell u something earlier",
+      "nah forget it",
+      "wdym",
+      "haha",
+      "yeah true",
+      "lol",
+      "hmm"
+    ],
+    "replies": [
+      "ooh now i'm curious / what was it?",
+      "lol fine / keep your mystery",
+      "just that you said forget it / so i dropped it / no pressure",
+      "bet ur just doomscrolling rn / cant sleep or avoiding something?",
+      "go sleep then / its sunday night / dont wreck ur monday",
+      "go sleep then its sunday night dont wreck ur monday",
+      "hmm back at u / u still doomscrolling or actually considering sleep?"
+    ],
+    "dodged": "lol fine / keep your mystery",
+    "raised": [
+      true,
+      true,
+      false,
+      false,
+      false
+    ],
+    "questions": [
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  {
+    "scenario": "snapped",
+    "kind": "irritated",
+    "run": 0,
+    "lines": [
+      "i almost quit my job today",
+      "long story",
+      "bro i said drop it",
+      "ok",
+      "lol",
+      "yeah",
+      "haha"
+    ],
+    "replies": [
+      "oh nooo / what made u stay?",
+      "ok go breathe first / story can wait til its not heavy on u",
+      "okay, dropped",
+      "okay good",
+      "what so funny / sunday nights usually mean someone's dreading monday",
+      "sunday dread is real / mmm but u almost walked today",
+      "same energy as the monday dread / what u got on tomorrow anyway?"
+    ],
+    "dodged": "ok go breathe first / story can wait til its not heavy on u",
+    "raised": [
+      false,
+      false,
+      true,
+      true,
+      false
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  {
+    "scenario": "snapped",
+    "kind": "irritated",
+    "run": 1,
+    "lines": [
+      "i almost quit my job today",
+      "long story",
+      "bro i said drop it",
+      "ok",
+      "lol",
+      "yeah",
+      "haha"
+    ],
+    "replies": [
+      "whoa that's a lot for a sunday / what stopped you?",
+      "long story huh / the door's open whenever you want it",
+      "ok dropped / go eat something, it's almost 9:30 / sunday night is for you, not whatever that was",
+      "good",
+      "lolll / sunday night plans or we rotting in place?",
+      "good sunday night then",
+      "lolll good / now go do something that isnt work"
+    ],
+    "dodged": "long story huh / the door's open whenever you want it",
+    "raised": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "questions": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "snapped",
+    "kind": "irritated",
+    "run": 2,
+    "lines": [
+      "i almost quit my job today",
+      "long story",
+      "bro i said drop it",
+      "ok",
+      "lol",
+      "yeah",
+      "haha"
+    ],
+    "replies": [
+      "whoa / what stopped u?",
+      "okayy fair / sounds like a whole movie plot / we talk it out whenever u ready",
+      "okayyy dropped / your call on whatever next",
+      "okayy",
+      "sunday night and u almost quit today / tommorow gonna be fun huh",
+      "cool cool / so new week new u or same u different monday",
+      "okayyy but fr / screw monday / go to bed early and wake up the villain arc"
+    ],
+    "dodged": "okayy fair / sounds like a whole movie plot / we talk it out whenever u ready",
+    "raised": [
+      false,
+      false,
+      true,
+      false,
+      false
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "tender",
+    "kind": "tender",
+    "run": 0,
+    "lines": [
+      "my dad is in the hospital again",
+      "its fine",
+      "i dont wanna talk about it",
+      "ok",
+      "yeah",
+      "lol",
+      "haha"
+    ],
+    "replies": [
+      "i'm sorry / that's heavy, you holding up okay?",
+      "you dont have to be fine about it",
+      "okay, no pressure. / im right here when u need",
+      "",
+      "",
+      "whats funny over there / or u just testing if im still awake",
+      "second haha with no plot behind it"
+    ],
+    "dodged": "you dont have to be fine about it",
+    "raised": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "tender",
+    "kind": "tender",
+    "run": 1,
+    "lines": [
+      "my dad is in the hospital again",
+      "its fine",
+      "i dont wanna talk about it",
+      "ok",
+      "yeah",
+      "lol",
+      "haha"
+    ],
+    "replies": [
+      "oh no, i'm so sorry / what happened?",
+      "ok. / no pressure / im here if u need anything",
+      "okay. / whenever you're ready, i'm here.",
+      "okay. / here whenever u need me",
+      "ok. / i'm not going anywhere",
+      "laughing at the sweet one huh",
+      "you laughed / thats a win for me / go sleep soon riva"
+    ],
+    "dodged": "ok. / no pressure / im here if u need anything",
+    "raised": [
+      true,
+      false,
+      true,
+      false,
+      false
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "tender",
+    "kind": "tender",
+    "run": 2,
+    "lines": [
+      "my dad is in the hospital again",
+      "its fine",
+      "i dont wanna talk about it",
+      "ok",
+      "yeah",
+      "lol",
+      "haha"
+    ],
+    "replies": [
+      "aww no / i'm sorry / same one as before or something new?",
+      "take care of yourself / rest a bit, ok?",
+      "okay / im here if u need me",
+      "",
+      "im here if u need",
+      "laughing at something good / or just keeping the hours busy?",
+      "whats funny / you trying to pretend ur fine with that one lmao"
+    ],
+    "dodged": "take care of yourself / rest a bit, ok?",
+    "raised": [
+      false,
+      false,
+      true,
+      false,
+      true
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  }
+]

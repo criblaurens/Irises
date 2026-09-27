@@ -21,7 +21,7 @@ import { ENVELOPE_FIELDS, STATUS_SCHEMA_PROP, type EnvelopeField } from './statu
  *  from the table, because a table that lost or gained a field would derive its own new answer. */
 const V2_KEYS: readonly string[] = [
   'mood_label', 'mood_shift', 'intent_mode', 'terminal_closure',
-  'epistemic_trigger', 'meta_prompt', 'hook_kind', 'language_request', 'turned_down', 'thread_note', 'thread_outcome',
+  'epistemic_trigger', 'meta_prompt', 'hook_kind', 'language_request', 'turned_down', 'dodged', 'thread_note', 'thread_outcome',
 ];
 
 /** The modules that declare every name the `consumers` column can use. Read as SOURCE rather than
@@ -48,7 +48,7 @@ function unreadFields(rows: readonly EnvelopeField[]): string[] {
   return rows.filter(f => f.consumers.length === 0).map(f => f.key);
 }
 
-test('the envelope is exactly the eleven v2 fields, in emission order', () => {
+test('the envelope is exactly the twelve v2 fields, in emission order', () => {
   assert.deepEqual(
     ENVELOPE_FIELDS.map(f => f.key), V2_KEYS,
     'the shrink from seventeen fields to eight is a one-way migration — a field added back here is '
@@ -56,7 +56,7 @@ test('the envelope is exactly the eleven v2 fields, in emission order', () => {
   );
 });
 
-test('the schema both lanes validate against requires those eleven keys and nothing else', () => {
+test('the schema both lanes validate against requires those twelve keys and nothing else', () => {
   const p = STATUS_SCHEMA_PROP as { required: string[]; properties: Record<string, unknown> };
   assert.deepEqual(p.required, V2_KEYS);
   assert.deepEqual(Object.keys(p.properties), V2_KEYS);
@@ -107,7 +107,10 @@ test('every consumer the table names is still an exported function', () => {
 
 /**
  * What `JSON.stringify(STATUS_SCHEMA_PROP)` stands at TODAY, in characters, rounded up inside the 2%
- * PROMPT_BUDGET holds its own lines to. 3,587 measured. The share turn: +174, from 3,413, over two
+ * PROMPT_BUDGET holds its own lines to. 4,789 measured with the dodge, one new row, `dodged`,
+ * the reply's read of whether their message ducked what her last reply asked of them, whatever its
+ * shape; thread_outcome could not carry it, since it fires only after a question or a tagged thread,
+ * and it gains three words of its own (pushed_back now covers a tender spot). Was 3,587 measured. The share turn: +174, from 3,413, over two
  * descriptions and no new row — +140 on `hook_kind`, which names a fourth word (`question`) and
  * carries the two sentences that are the model's whole side of the question gate (a question
  * outranks the other kinds when one was asked; a question off a share turn is reported rather than
@@ -150,7 +153,7 @@ test('every consumer the table names is still an exported function', () => {
 // say on, because a field that could be set on a fact they asked for would let a bad mood skip the
 // routing floor on exactly the turn it exists for.
 // Feelings (2026-09-26): +67, to 4,224, `mood_label` asked to fit the feelings her weather names.
-const SCHEMA_JSON_CEILING = 4_290;
+const SCHEMA_JSON_CEILING = 4_880;
 
 /** How much the ceiling may sit above the measurement, copied from promptBudget.test.ts so this copy
  *  of the descriptions is held to the same band as the `status_contract` copy of them. The downward

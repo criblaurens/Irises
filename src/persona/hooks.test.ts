@@ -31,10 +31,11 @@ import {
   MOMENTS_LEAD, QUIET_HEADING, QUIET_LAW,
   SHARE_HEADING, SHARE_LEAD, SHARE_OPEN_LINE, SHARE_QUESTION_LINE, SHARE_NONE_OPEN, SHARE_LATE_LINE,
   LOOSE_LEVEL_LINES, PUSH_LINE, PUSH_PERCENT, QUIZ_PUSH_MS, QUIZ_ROAST_PERCENT,
+  recordDodge, curiosityPercent, DODGE_COOLDOWN_MS, DODGE_PLAIN_MS, DODGE_DROPPED_MS,
   type HookAffectInput, type HookDirective, type HookKind, type HookState, type HookWord,
   type TurnKind,
 } from './hooks.js';
-import { renderDriftAnchor, PUSH_BULLET } from './policy.js';
+import { renderDriftAnchor, PUSH_BULLET, DODGE_SPENT_BULLET } from './policy.js';
 
 const T0 = Date.UTC(2026, 3, 1);
 
@@ -976,4 +977,49 @@ test('a quiz is refused, the push right after it is answered annoyed, and the cl
   // Giving in clears it.
   assert.equal(recordHook(after, undefined, 'task', false, T0 + 60_000, 'pushed').quizzedAt, undefined);
   assert.equal(recordHook(after, undefined, 'idle', false, T0 + 60_000).quizzedAt, T0);
+});
+
+// ══ 12. Dodges ════════════════════════════════════════════════════════════════
+
+test('a dodge is spent, curiosity may bring a plain one back once, and a bristle or a tender spot drops it', () => {
+  const HER = T0 - 60_000;
+  const plain = recordDodge(state(), { outcome: 'passed', herLastAt: HER }, T0);
+  assert.deepEqual(plain.dodges, [{ at: HER, since: T0 }]);
+  // Inside the cooldown it is spent whatever her mood.
+  const early = selectHook(plain, 'idle', 'fast_path', { ...OPEN, curiosity: 100 }, false, T0 + 60_000).directive;
+  assert.deepEqual(early.dodges, { spent: [HER] });
+  // Past it, a curious mood brings it back; a flat one never does.
+  const later = T0 + DODGE_COOLDOWN_MS + 1000;
+  assert.deepEqual(selectHook(plain, 'idle', 'fast_path', { ...OPEN, curiosity: 100 }, false, later).directive.dodges, { spent: [], curious: HER });
+  assert.deepEqual(selectHook(plain, 'idle', 'fast_path', { ...OPEN, curiosity: 0 }, false, later).directive.dodges, { spent: [HER] });
+  // The way back is used once: dodged again, the new pointer has none, and neither does the old one.
+  const allowed = recordDodge(plain, { curious: HER }, later);
+  const HER2 = later + 5000;
+  const again = recordDodge(allowed, { outcome: 'passed', herLastAt: HER2 }, later + 60_000);
+  assert.ok(again.dodges!.every(d => d.reraised));
+  assert.equal(selectHook(again, 'idle', 'fast_path', { ...OPEN, curiosity: 100 }, false, later + DODGE_COOLDOWN_MS * 2).directive.dodges?.curious, undefined);
+  // Taken up instead, the thread is alive again and the dodge is gone.
+  assert.equal(recordDodge(allowed, { outcome: 'took' }, later + 60_000).dodges, undefined);
+  // A bristle or a tender spot: dropped, never drawn, and it outlives a plain dodge's window.
+  for (const input of [{ outcome: 'pushed_back', herLastAt: HER }, { outcome: 'passed', tender: true, herLastAt: HER }]) {
+    const dropped = recordDodge(state(), input, T0);
+    assert.equal(dropped.dodges![0].dropped, true);
+    assert.equal(selectHook(dropped, 'idle', 'fast_path', { ...OPEN, curiosity: 100 }, false, T0 + DODGE_PLAIN_MS + 1000).directive.dodges?.curious, undefined);
+    assert.deepEqual(selectHook(dropped, 'idle', 'fast_path', OPEN, false, T0 + DODGE_PLAIN_MS + 1000).directive.dodges, { spent: [HER] });
+    assert.equal(selectHook(dropped, 'idle', 'fast_path', OPEN, false, T0 + DODGE_DROPPED_MS).directive.dodges, undefined);
+  }
+  // A dodge that is not one leaves the ledger alone, and recordHook carries it through.
+  assert.equal(recordDodge(state(), { outcome: null, herLastAt: HER }, T0).dodges, undefined);
+  assert.deepEqual(recordHook(plain, undefined, 'idle', false, T0 + 1).dodges, plain.dodges);
+  // Curiosity reads her mood, never her say-so.
+  assert.equal(curiosityPercent('joyful', 'curious'), 60);
+  assert.equal(curiosityPercent('joyful', 'cheerful'), 35);
+  assert.equal(curiosityPercent('sad', 'curious'), 0);
+  // The edge names what they held back, on hook and share turns only.
+  const edge = renderDriftAnchor('hook', 0, undefined, undefined, { spent: 1 });
+  assert.ok(edge.endsWith(DODGE_SPENT_BULLET));
+  assert.ok(!renderDriftAnchor('task', 0, undefined, undefined, { spent: 1 }).includes(DODGE_SPENT_BULLET));
+  // The envelope's own word counts as a dodge whatever shape her reply had; shut drops it.
+  assert.equal(recordDodge(state(), { dodged: 'shut', herLastAt: HER }, T0).dodges![0].dropped, true);
+  assert.deepEqual(recordDodge(state(), { dodged: 'plain', herLastAt: HER }, T0).dodges, [{ at: HER, since: T0 }]);
 });

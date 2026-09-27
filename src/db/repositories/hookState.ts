@@ -28,7 +28,7 @@
 import { logDbError } from '../client.js';
 import { stmt } from '../sqlite.js';
 import { getForgetEpoch } from './memory.js';
-import { defaultHookState, HOOK_RUN_LIMIT, HOOK_WORDS, type HookKind, type HookState } from '../../persona/hooks.js';
+import { defaultHookState, HOOK_RUN_LIMIT, HOOK_WORDS, type Dodge, type HookKind, type HookState } from '../../persona/hooks.js';
 
 type Row = { chat_id: string; handle: string; state_json: string; updated_at: number };
 
@@ -67,6 +67,17 @@ function coerceKinds(raw: unknown): HookKind[] {
     .slice(-HOOK_RUN_LIMIT);
 }
 
+/** The dodge ledger, entry by entry: a garbled entry is dropped, never guessed at. */
+function coerceDodges(raw: unknown): Dodge[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((d): Dodge[] => {
+    if (!d || typeof d !== 'object') return [];
+    const o = d as Record<string, unknown>;
+    if (typeof o.at !== 'number' || !Number.isFinite(o.at) || typeof o.since !== 'number' || !Number.isFinite(o.since)) return [];
+    return [{ at: o.at, since: o.since, ...(o.dropped === true ? { dropped: true as const } : {}), ...(o.reraised === true ? { reraised: true as const } : {}) }];
+  });
+}
+
 /** Stored JSON → a whole state. One shape, coerced field by field: a garbled streak is still the
  *  right chat's ledger, and losing the kind window over it would cost the kill switch its memory. */
 function coerceHookState(raw: unknown): HookState {
@@ -78,6 +89,8 @@ function coerceHookState(raw: unknown): HookState {
     idleSinceMoment: countOr(s.idleSinceMoment),
     updatedAt: stampOr(s.updatedAt),
     ...(typeof s.quizzedAt === 'number' && Number.isFinite(s.quizzedAt) ? { quizzedAt: s.quizzedAt } : {}),
+    ...(coerceDodges(s.dodges).length ? { dodges: coerceDodges(s.dodges) } : {}),
+    ...(typeof s.curiousAt === 'number' && Number.isFinite(s.curiousAt) ? { curiousAt: s.curiousAt } : {}),
   };
 }
 

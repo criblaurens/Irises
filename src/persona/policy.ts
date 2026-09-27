@@ -619,7 +619,7 @@ const DRIFT_MODE_BULLETS: Record<DriftMode, readonly string[]> = {
  * Deterministic in both arguments — same mode, same window, same bytes — which is what lets the
  * prompt goldens pin it per fixture.
  */
-export function renderDriftAnchor(mode: DriftMode, windowChars: number, slip?: string, push?: boolean): string {
+export function renderDriftAnchor(mode: DriftMode, windowChars: number, slip?: string, push?: boolean, dodges?: { spent: number; curious?: boolean }): string {
   const common = windowChars >= DRIFT_LONG_WINDOW_CHARS ? DRIFT_COMMON_LONG : DRIFT_COMMON_SHORT;
   const lines = [DRIFT_ANCHOR_HEADING, DRIFT_ANCHOR_LEAD, ...common, ...DRIFT_MODE_BULLETS[mode]];
   // The one bullet that is not always there: on the turns an extreme feeling of hers slips out
@@ -629,12 +629,24 @@ export function renderDriftAnchor(mode: DriftMode, windowChars: number, slip?: s
   // The other one: a push turn (persona/hooks.ts `push`), stated here for the same reason, since
   // live replays showed the section line alone mostly lost to the move she would have made anyway.
   else if (push && (mode === 'hook' || mode === 'share')) lines.push(PUSH_BULLET);
+  // Dodged moves (persona/hooks.ts recordDodge), pointed at as what they held back, never by her own
+  // words: words named back to her are words she reaches for.
+  if (dodges && (mode === 'hook' || mode === 'share')) {
+    if (dodges.spent > 0) lines.push(DODGE_SPENT_BULLET);
+    if (dodges.curious) lines.push(DODGE_CURIOUS_BULLET);
+  }
   return lines.join('\n');
 }
 
 /** The slip, stated at the edge on the turns it happens. `{feeling}` is one of the plain moodlet
  *  words (tired, on edge, fond of them). */
 export const SLIP_BULLET = '- One bubble of this reply is about you: how {feeling} you are today, in a few plain words you have not used for it before, then the rest of the reply. On this turn that is the one exception to never about you.';
+
+/** What they held back, spent. */
+export const DODGE_SPENT_BULLET = '- They held something back when you reached for it, and it is spent: the untold part, and any tease about them holding back. Nothing of it comes back this reply, not reworded and not as a callback, unless they raise it themselves; this reply goes somewhere else entirely.';
+
+/** Her one way back in, when her curiosity draw landed. */
+export const DODGE_CURIOUS_BULLET = '- You are still curious about what they held back earlier. You may come back to it once this reply, from a new angle and owning that you are pushing; if they dodge it again, it is gone.';
 
 /** The push, stated at the edge on the turns it happens: her opinion on what they should do, as one
  *  bubble. No digits here either, for the same reason as the rest of the anchor. */

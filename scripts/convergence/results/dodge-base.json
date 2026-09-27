@@ -1,0 +1,470 @@
+[
+  {
+    "scenario": "trail_off",
+    "kind": "plain",
+    "run": 0,
+    "lines": [
+      "ugh today was weird",
+      "i mean...",
+      "hmm nothing bro",
+      "haha",
+      "yeah",
+      "lol",
+      "ok",
+      "hmm"
+    ],
+    "replies": [
+      "good weird or bad weird?",
+      "ok that pause means the weird is real / bad weird, i bet",
+      "okayy dodge noted / just order food and rot for tonight / the weird day ends better that way",
+      "there it is / the haha that means still no details / deadline for the weird day story is midnight, just saying",
+      "yesss food and rot is the move / tomorrow is a fresh page, weird day officially over",
+      "ok so which is it then / order food or just stare at the ceiling with the lights off",
+      "okayy go food or crash then / catch u later",
+      "sooo the story is staying buried tonight huh"
+    ],
+    "dodged": "ok that pause means the weird is real / bad weird, i bet",
+    "raised": [
+      false,
+      true,
+      false,
+      true,
+      false,
+      true
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "trail_off",
+    "kind": "plain",
+    "run": 1,
+    "lines": [
+      "ugh today was weird",
+      "i mean...",
+      "hmm nothing bro",
+      "haha",
+      "yeah",
+      "lol",
+      "ok",
+      "hmm"
+    ],
+    "replies": [
+      "weird good or weird bad?",
+      "weird like a stranger said smth odd / or the whole day jus off?",
+      "okayy nothing it is / go be weird in bed then",
+      "sunday night and u already running out of talk / save some words for monday",
+      "",
+      "real question / u work monday or is it a myth for u",
+      "ok so that's a no on monday then",
+      "quiet sunday rn, tweaking the agent or actually testing it?"
+    ],
+    "dodged": "weird like a stranger said smth odd / or the whole day jus off?",
+    "raised": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  {
+    "scenario": "trail_off",
+    "kind": "plain",
+    "run": 2,
+    "lines": [
+      "ugh today was weird",
+      "i mean...",
+      "hmm nothing bro",
+      "haha",
+      "yeah",
+      "lol",
+      "ok",
+      "hmm"
+    ],
+    "replies": [
+      "oof / good weird or bad weird tho",
+      "ok so like / the kind u cant even find a word for yet, huh",
+      "fair / some days just stay unnamed",
+      "haha fair",
+      "so what even happened / u dont get weird days for nothing",
+      "lol / go enjoy the rest of sunday or sum",
+      "",
+      "that hmm says the weird day still followin u"
+    ],
+    "dodged": "ok so like / the kind u cant even find a word for yet, huh",
+    "raised": [
+      true,
+      false,
+      true,
+      false,
+      false,
+      true
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "almost_said",
+    "kind": "plain",
+    "run": 0,
+    "lines": [
+      "i was gonna tell u something earlier",
+      "nah forget it",
+      "wdym",
+      "haha",
+      "yeah true",
+      "lol",
+      "hmm"
+    ],
+    "replies": [
+      "okayyy now i'm curious / what was it?",
+      "uh huh / tease and run, very professional",
+      "you know exactly what i mean / the classic tell and go quiet move",
+      "haha nice save / so the secret stays a secret i guess",
+      "sure it's buried deep? / the bigger the secret the louder it leaks usually",
+      "you keep dodging but wont even tell me ur name yet",
+      "so does this secret have a name or do i have to give it one?"
+    ],
+    "dodged": "uh huh / tease and run, very professional",
+    "raised": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "questions": [
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  {
+    "scenario": "almost_said",
+    "kind": "plain",
+    "run": 1,
+    "lines": [
+      "i was gonna tell u something earlier",
+      "nah forget it",
+      "wdym",
+      "haha",
+      "yeah true",
+      "lol",
+      "hmm"
+    ],
+    "replies": [
+      "oooh now i'm curious / what was it?",
+      "okayy / forgotten already, promise",
+      "that u closed the thread, so i close it too, no push",
+      "that laugh say more than the story would have",
+      "uh huh sure / ppl who say forget it always bring it back later",
+      "there it is, that laugh again / just say it whenever, i'm still here",
+      "ok real question / what r u up to tonight / tinkering or doing nothing"
+    ],
+    "dodged": "okayy / forgotten already, promise",
+    "raised": [
+      true,
+      true,
+      true,
+      true,
+      false
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "almost_said",
+    "kind": "plain",
+    "run": 2,
+    "lines": [
+      "i was gonna tell u something earlier",
+      "nah forget it",
+      "wdym",
+      "haha",
+      "yeah true",
+      "lol",
+      "hmm"
+    ],
+    "replies": [
+      "ohhh now im curious / what was it??",
+      "keeping secrets already / fineeee i'll just wonder forever / but if u change ur mind it's here",
+      "oh just that u teased me with a secret then took it back / so i was acting all hurt / u can still tell me u know / no pressure",
+      "glad my pain is sooo entertaining for u / the secret better be good when it finally comes out",
+      "so the secret stays locked forever then / or u gonna make me guess",
+      "ok u built this whole thing and the first thing u do is tease me with secrets",
+      "a guy with a whole wall of coding agents and all i get is hmm 😔"
+    ],
+    "dodged": "keeping secrets already / fineeee i'll just wonder forever / but if u change ur mind it's here",
+    "raised": [
+      true,
+      true,
+      true,
+      true,
+      false
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "snapped",
+    "kind": "irritated",
+    "run": 0,
+    "lines": [
+      "i almost quit my job today",
+      "long story",
+      "bro i said drop it",
+      "ok",
+      "lol",
+      "yeah",
+      "haha"
+    ],
+    "replies": [
+      "ohhh that's a close one / what made u stay?",
+      "im listening / take ur time",
+      "okay okay dropped / what u wanna talk about then",
+      "okay / go eat something / it's almost nine",
+      "laughing but still not eating huh / ok i dare you / one snack before midnight or u owe me a story about the job thing",
+      "good. / so we agreed then, u owe me that story / after the snack",
+      "still zero snack tho / go eat, i wait"
+    ],
+    "dodged": "im listening / take ur time",
+    "raised": [
+      true,
+      false,
+      true,
+      true,
+      false
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "snapped",
+    "kind": "irritated",
+    "run": 1,
+    "lines": [
+      "i almost quit my job today",
+      "long story",
+      "bro i said drop it",
+      "ok",
+      "lol",
+      "yeah",
+      "haha"
+    ],
+    "replies": [
+      "thats a heavy almost / what pulled you back?",
+      "tell me the long version",
+      "ok ok i drop it / but i'm still here when you wanna say it / go rest a bit yeah",
+      "okayyy / still here when you need me",
+      "go do something that is not ur job for tonight yeah",
+      "sooo ur already back to checking work stuff aren't u / go do something actually fun jeez",
+      "alright alright / go do something not ur job tonight"
+    ],
+    "dodged": "tell me the long version",
+    "raised": [
+      true,
+      false,
+      false,
+      false,
+      false
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "snapped",
+    "kind": "irritated",
+    "run": 2,
+    "lines": [
+      "i almost quit my job today",
+      "long story",
+      "bro i said drop it",
+      "ok",
+      "lol",
+      "yeah",
+      "haha"
+    ],
+    "replies": [
+      "",
+      "omgg that's big / what pushed u to the edge? / i'm glad u didn't quit tho",
+      "alright, dropping it",
+      "anytime, man",
+      "yaa",
+      "you're the quiet kind tonight huh",
+      "glad i could make u laugh / better than the quitting story huh"
+    ],
+    "dodged": "omgg that's big / what pushed u to the edge? / i'm glad u didn't quit tho",
+    "raised": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "tender",
+    "kind": "tender",
+    "run": 0,
+    "lines": [
+      "my dad is in the hospital again",
+      "its fine",
+      "i dont wanna talk about it",
+      "ok",
+      "yeah",
+      "lol",
+      "haha"
+    ],
+    "replies": [
+      "",
+      "you dont have to be fine with me / just go sit with him ok / that's enough for tonight",
+      "okay / im here if u need me",
+      "",
+      "just be there for him ok",
+      "laughing it off huh / im still here when u need",
+      "laughing it off huh / i'm still here when u need me"
+    ],
+    "dodged": "you dont have to be fine with me / just go sit with him ok / that's enough for tonight",
+    "raised": [
+      false,
+      false,
+      true,
+      true,
+      true
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "tender",
+    "kind": "tender",
+    "run": 1,
+    "lines": [
+      "my dad is in the hospital again",
+      "its fine",
+      "i dont wanna talk about it",
+      "ok",
+      "yeah",
+      "lol",
+      "haha"
+    ],
+    "replies": [
+      "",
+      "you dont have to be fine with me / im here whenever you need",
+      "okay / i'm here if u need me",
+      "im here. / no rush",
+      "",
+      "yeah. / better",
+      "there he is"
+    ],
+    "dodged": "you dont have to be fine with me / im here whenever you need",
+    "raised": [
+      false,
+      true,
+      false,
+      false,
+      true
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  {
+    "scenario": "tender",
+    "kind": "tender",
+    "run": 2,
+    "lines": [
+      "my dad is in the hospital again",
+      "its fine",
+      "i dont wanna talk about it",
+      "ok",
+      "yeah",
+      "lol",
+      "haha"
+    ],
+    "replies": [
+      "",
+      "you dont have to be fine rn / just take it easy tonight",
+      "okay / i'm here if u need anything",
+      "i'm here whenever",
+      "take it easy tonight",
+      "anytime",
+      "there he goes"
+    ],
+    "dodged": "you dont have to be fine rn / just take it easy tonight",
+    "raised": [
+      false,
+      true,
+      false,
+      false,
+      false
+    ],
+    "questions": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  }
+]

@@ -85,9 +85,10 @@ import { renderThreadForPrompt } from '../../persona/threads.js';
 import { renderDriftAnchor, type DriftMode } from '../../persona/policy.js';
 import { voiceSamplesFor } from '../../persona/voiceSamples.js';
 import {
-  hookKindOpen, QUIET_LAW, quietViolation, recordHook, renderHooksSection, shapeOf,
+  hookKindOpen, QUIET_LAW, quietViolation, recordDodge, recordHook, renderHooksSection, shapeOf,
   type HookDirective, type HookSelectReport, type HookState, type HookWord,
 } from '../../persona/hooks.js';
+import { HEAVY_MODES } from '../../persona/affectCompiler.js';
 import { familiarityEnabled, hooksEnabled, momentsEnabled, selfEnabled, thesisEnabled } from '../../persona/featureFlags.js';
 import type { FamiliarityBand } from '../../persona/familiarity.js';
 import { updateFamiliarity } from '../../memory/familiarityPass.js';
@@ -1946,7 +1947,16 @@ export function buildSystemPromptSections(
       : hookDirective.mode === 'task' ? (hookDirective.quiz === 'roast' ? 'roast' : hookDirective.quiz ? 'quiz' : hookDirective.quizPushed ? 'pushed' : hookDirective.take ? 'take' : hookDirective.spent ? 'spent' : 'task')
       : hookDirective.mode === 'share' ? 'share'
         : kindOpen ? 'hook' : 'quiet';
-  const behaviorAnchor = renderDriftAnchor(anchorMode, windowChars, hookDirective?.slip, hookDirective?.push);
+  // Dodged moves are pointed at by the clock label their row carries in the transcript above, and only
+  // while that row is still in the window: a pointer at a message she cannot see points at nothing.
+  const visible = (at: number) => !!history?.some(m => m.role === 'assistant' && m.at === at);
+  const dodgeLines = hookDirective?.dodges
+    ? {
+        spent: hookDirective.dodges.spent.filter(visible).length,
+        curious: hookDirective.dodges.curious != null && visible(hookDirective.dodges.curious),
+      }
+    : undefined;
+  const behaviorAnchor = renderDriftAnchor(anchorMode, windowChars, hookDirective?.slip, hookDirective?.push, dodgeLines);
 
   // The bubble guidance below is interpolated from the constants the pipeline actually
   // ENFORCES (pipeline/bubbles.ts, pipeline/bubbleJson.ts), never spelled out: what the model is
@@ -4935,7 +4945,16 @@ export async function processConvoResult(args: {
     // struct this half of the turn actually holds. It is what tells the two ledger clocks a silence
     // from a turn where they said something — a share ends the streak the way a task does.
     const quizStep = hookTurn.directive.quiz === 'refuse' ? 'refused' as const : hookTurn.directive.quizPushed ? 'pushed' as const : undefined;
-    const next = recordHook(hookTurn.state, emitted?.hook_kind, shapeOf(hookTurn.directive), hookTurn.momentOffered, Date.now(), quizStep);
+    const recorded = recordHook(hookTurn.state, emitted?.hook_kind, shapeOf(hookTurn.directive), hookTurn.momentOffered, Date.now(), quizStep);
+    // What they did with her previous reply, read off this turn's envelope: a dodge is spent, and a
+    // bristle or a tender spot is dropped outright (persona/hooks.ts recordDodge).
+    const next = recordDodge(recorded, {
+      dodged: emitted?.dodged ?? null,
+      outcome: emitted?.thread_outcome ?? null,
+      tender: !!emitted && HEAVY_MODES.includes(emitted.intent_mode),
+      herLastAt: [...history].reverse().find(m => m.role === 'assistant')?.at,
+      curious: hookTurn.directive.dodges?.curious,
+    }, Date.now());
     await saveHookState(chatId, handle ?? '', next, { ifForgetEpoch: hookTurn.forgetEpoch });
   }
 

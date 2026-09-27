@@ -37,7 +37,7 @@ import {
   type IdleFacts, type IdleReading, type IdleVerdict,
 } from '../../persona/idle.js';
 import { makeIdleClassifier } from './idleClassify.js';
-import { defaultHookState, selectHook, type HookDirective, type HookSelectReport } from '../../persona/hooks.js';
+import { curiosityPercent, defaultHookState, selectHook, type HookDirective, type HookSelectReport } from '../../persona/hooks.js';
 import { familiarityEnabled, hooksEnabled, momentsEnabled, selfEnabled, shareTurnsEnabled, thesisEnabled } from '../../persona/featureFlags.js';
 import { compileAffect, type CarriedIntent } from '../../persona/affectCompiler.js';
 import { AFFECT_FRESH_MS } from '../../persona/threads.js';
@@ -628,6 +628,8 @@ export async function chat(
         spent: affectDirective.spent,
         low: affectDirective.low,
         stranger: affectDirective.mask === 'stranger',
+        curiosity: curiosityPercent(last?.mood_core, last?.mood_label),
+        ...(Number(process.env.DODGE_COOLDOWN_MS) > 0 ? { dodgeCooldownMs: Number(process.env.DODGE_COOLDOWN_MS) } : {}),
         slip: affectDirective.feelingSlip || undefined,
       },
       isGroupChat, nowMs, idle.take === true, idle.quiz === true,

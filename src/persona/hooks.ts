@@ -103,6 +103,23 @@ export interface HookState {
   /** When she last turned down a quiz. Inside QUIZ_PUSH_MS the next task is read as them pushing
    *  for it, and she gives in, annoyed. Cleared once she has. */
   quizzedAt?: number;
+  /** Moves of hers they let lie (recordDodge), newest last, at most DODGE_KEEP. */
+  dodges?: Dodge[];
+  /** The dodge her last reply was allowed back to, so the next turn can tell what they did with it. */
+  curiousAt?: number;
+}
+
+/** A move of hers they dodged. `at` is her message's own stamp, which is also how the recency edge
+ *  points at it: by the transcript's clock label, never by her words, because words named back to
+ *  her are words she reaches for. */
+export interface Dodge {
+  at: number;
+  /** When they dodged it. */
+  since: number;
+  /** They bristled, or it was tender for them: gone for DODGE_DROPPED_MS, no curiosity draw. */
+  dropped?: true;
+  /** Her one way back in is spent. */
+  reraised?: true;
 }
 
 /** The resting state: no history, no streak, and `idleSinceMoment` at zero so a brand-new chat must
@@ -190,6 +207,11 @@ export interface HookAffectInput {
   low?: boolean;
   /** The extreme feeling that slips out this turn (affect compiler `feelingSlip`), or absent. */
   slip?: string;
+  /** How likely she is, this turn, to come back to a plain dodge after its cooldown: curiosityPercent
+   *  off her mood. Absent reads as none. */
+  curiosity?: number;
+  /** DODGE_COOLDOWN_MS unless overridden (a battery sets it short). */
+  dodgeCooldownMs?: number;
   /** They are a stranger to her (the familiarity mask's effective band). Her default self gets to
    *  know someone by asking, so a judgment, which needs material she does not have yet, is closed. */
   stranger?: boolean;
@@ -249,6 +271,9 @@ export interface HookDirective {
    *  `quiz`), and which way she takes it: `refuse` holds the answer back, `roast` gives it with a
    *  twist that makes it a dig at them. Only ever set on `task`; the edge states the law (policy.ts). */
   quiz?: 'refuse' | 'roast';
+  /** Dodged moves the recency edge names this turn: the ones still spent, and at most one she is
+   *  curious enough to come back to. Stamps; the prompt renders them as transcript clock labels. */
+  dodges?: { spent: number[]; curious?: number };
   /** The task right after she turned a quiz down: likely them pushing for it, so she answers it
    *  this time, visibly annoyed, or answers whatever real thing they moved on to. */
   quizPushed?: true;
@@ -376,6 +401,84 @@ function repeatedTailKind(lastKinds: readonly HookKind[]): HookWord | null {
  * shape was built to refuse, so the flat-mood floor narrows a share turn to presence instead of
  * closing it, and the turn still has to say one plain thing about their thing.
  */
+/** How many dodges the ledger keeps, and how long each kind stays spent. */
+export const DODGE_KEEP = 3;
+export const DODGE_PLAIN_MS = 12 * 60 * 60 * 1000;
+export const DODGE_DROPPED_MS = 7 * 24 * 60 * 60 * 1000;
+/** How long a plain dodge is off the table before her curiosity gets a say. */
+export const DODGE_COOLDOWN_MS = 30 * 60 * 1000;
+
+/** The mood words of her curious state; the joyful core carries them (persona/mood.ts). */
+const CURIOUS_LABELS: ReadonlySet<string> = new Set(['curious', 'fascinated', 'stimulated']);
+
+/** How likely she is to come back to a plain dodge on a given turn, from her mood. Her own claim of
+ *  curiosity cannot be the gate: "now i curious what it was" is what she said on every turn of the
+ *  loop this exists for. Low, sad, mad or scared, she lets it be. */
+export function curiosityPercent(core?: string, label?: string): number {
+  if (core === 'joyful') return label && CURIOUS_LABELS.has(label.toLowerCase()) ? 60 : 35;
+  if (core === 'powerful' || core === 'peaceful') return 20;
+  return 0;
+}
+
+/** Dodges still inside their window. */
+export function liveDodges(dodges: readonly Dodge[] | undefined, now: number): Dodge[] {
+  return (dodges ?? []).filter(d => now - d.since >= 0 && now - d.since < (d.dropped ? DODGE_DROPPED_MS : DODGE_PLAIN_MS));
+}
+
+function dodgeDraw(now: number): number {
+  const n = Number.isFinite(now) ? Math.floor(Math.abs(now) / 1000) : 0;
+  return ((n % 1_000_003) * 6_133) % 100;
+}
+
+/** What the edge says about dodges this turn: every live one is spent, except at most one plain dodge
+ *  past its cooldown that she has not come back to yet, when her curiosity draw lands. */
+function viewDodges(state: HookState, now: number, affect: HookAffectInput): HookDirective['dodges'] {
+  const live = liveDodges(state.dodges, now);
+  if (!live.length) return undefined;
+  const cooldown = affect.dodgeCooldownMs ?? DODGE_COOLDOWN_MS;
+  const open = live.filter(d => !d.dropped && !d.reraised && now - d.since >= cooldown);
+  const pick = open.length && dodgeDraw(now) < (affect.curiosity ?? 0) ? open[open.length - 1] : undefined;
+  return { spent: live.filter(d => d !== pick).map(d => d.at), ...(pick ? { curious: pick.at } : {}) };
+}
+
+/**
+ * Fold what they did with her last move into the dodge ledger. Pure, and called after recordHook on
+ * the reply path. `dodged` is the envelope's read of their message (plain or shut), `outcome` its
+ * thread_outcome for her previous reply, `herLastAt` that
+ * reply's stamp, `tender` whether they were venting or overwhelmed, and `curious` the dodge THIS
+ * reply was allowed back to (the directive's).
+ *
+ *   • passed: a plain dodge, spent, and after its cooldown her curiosity may bring it back once;
+ *   • pushed_back, or tender: dropped for DODGE_DROPPED_MS, no way back;
+ *   • her way back taken and dodged again: the new pointer carries no way back either; taken and
+ *     picked up (took): the dodge is gone, because the thread is alive again.
+ */
+export function recordDodge(
+  state: HookState,
+  input: { dodged?: string | null; outcome?: string | null; tender?: boolean; herLastAt?: number; curious?: number },
+  now: number,
+): HookState {
+  const prior = state.curiousAt;
+  // The envelope's own `dodged` word first; thread_outcome's reading of a question or a thread counts
+  // too, since the two are read off the same message and either one is a dodge.
+  const dodged = input.dodged === 'plain' || input.dodged === 'shut' || input.outcome === 'passed' || input.outcome === 'pushed_back';
+  const hard = input.dodged === 'shut' || input.outcome === 'pushed_back' || input.tender === true;
+  let dodges = liveDodges(state.dodges, now);
+  if (prior != null && input.outcome === 'took') dodges = dodges.filter(d => d.at !== prior);
+  if (prior != null && dodged && hard) dodges = dodges.map(d => (d.at === prior ? { ...d, dropped: true as const } : d));
+  if (dodged && input.herLastAt != null && !dodges.some(d => d.at === input.herLastAt)) {
+    dodges.push({ at: input.herLastAt, since: now, ...(hard ? { dropped: true as const } : {}), ...(prior != null ? { reraised: true as const } : {}) });
+  }
+  if (input.curious != null) dodges = dodges.map(d => (d.at === input.curious ? { ...d, reraised: true as const } : d));
+  const { dodges: _d, curiousAt: _c, ...rest } = state;
+  void _d; void _c;
+  return {
+    ...rest,
+    ...(dodges.length ? { dodges: dodges.slice(-DODGE_KEEP) } : {}),
+    ...(input.curious != null ? { curiousAt: input.curious } : {}),
+  };
+}
+
 /** Of the hook and share turns with a move open, the share on which the move is her telling them what
  *  to do. She has an opinion on everything they do; a friend who voiced it on every text would be a
  *  nag, and one who never did would have none. */
@@ -413,6 +516,8 @@ export function selectHook(
   // one move is already spoken for. The branches below add their own: a share that is heavy gets
   // company, and a turn with no move open has nothing to land it as.
   const pushDrawn = !isGroup && !affect.slip && pushDraw(now) < PUSH_PERCENT;
+  const dodgeView = viewDodges(state, now, affect);
+  const withDodges = dodgeView ? { dodges: dodgeView } : {};
   // Sliced here as well as on the way into the store: the selector must give the same answer for a
   // hand-built state as for a stored one, and a longer window would be a kill switch with a longer
   // memory than the ledger it is documented to read.
@@ -509,6 +614,7 @@ export function selectHook(
         ...(affect.low ? { low: true } : {}),
         ...(affect.slip ? { slip: affect.slip } : {}),
         ...(sharePush ? { push: true as const } : {}),
+        ...withDodges,
       },
       report: { ...report('share', shareForbidden), ...(sharePush ? { push: true as const } : {}) },
     };
@@ -530,7 +636,7 @@ export function selectHook(
     if (!canAsk && !canRant) return quiet('kill_switch');
     const forbidden = HOOK_WORDS.filter(w => !(w === 'question' && canAsk) && !(w === 'tangent' && canRant));
     return {
-      directive: { idle: true, mode: 'hook', forbidden, lateNight: affect.lateNight, moments: false, offerAllowed: false, playLevel: computePlayLevel('hook', affect), englishLooseness: affect.englishLooseness as 0 | 1 | 2 | 3 | undefined },
+      directive: { idle: true, mode: 'hook', forbidden, lateNight: affect.lateNight, moments: false, offerAllowed: false, playLevel: computePlayLevel('hook', affect), englishLooseness: affect.englishLooseness as 0 | 1 | 2 | 3 | undefined, ...withDodges },
       report: report('kill_switch', forbidden),
     };
   }
@@ -541,7 +647,7 @@ export function selectHook(
     if (affect.question !== 'open' || isGroup || repeated === 'question') return quiet('affect_floor');
     const forbidden = HOOK_WORDS.filter(w => w !== 'question');
     return {
-      directive: { idle: true, mode: 'hook', forbidden, lateNight: affect.lateNight, moments: false, offerAllowed: false, playLevel: 0, englishLooseness: affect.englishLooseness as 0 | 1 | 2 | 3 | undefined, low: true },
+      directive: { idle: true, mode: 'hook', forbidden, lateNight: affect.lateNight, moments: false, offerAllowed: false, playLevel: 0, englishLooseness: affect.englishLooseness as 0 | 1 | 2 | 3 | undefined, low: true, ...withDodges },
       report: report('affect_floor', forbidden),
     };
   }
@@ -578,6 +684,7 @@ export function selectHook(
       ...(affect.low ? { low: true } : {}),
       ...(affect.slip ? { slip: affect.slip } : {}),
       ...(hookPush ? { push: true as const } : {}),
+      ...withDodges,
     },
     report: { ...report('hook', hookForbidden), ...(hookPush ? { push: true as const } : {}) },
   };
@@ -635,6 +742,9 @@ export function recordHook(
     // A refusal stamps the clock the next turn reads; giving in clears it. Anything else keeps it,
     // and QUIZ_PUSH_MS lets it lapse on its own.
     ...(quiz === 'refused' ? { quizzedAt: now } : quiz === 'pushed' || state.quizzedAt === undefined ? {} : { quizzedAt: state.quizzedAt }),
+    // The dodge ledger is recordDodge's, folded right after this; carried through untouched.
+    ...(state.dodges ? { dodges: state.dodges } : {}),
+    ...(state.curiousAt != null ? { curiousAt: state.curiousAt } : {}),
   };
 }
 
