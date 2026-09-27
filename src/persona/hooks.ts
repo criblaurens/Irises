@@ -100,6 +100,9 @@ export interface HookState {
   idleSinceMoment: number;
   /** Injected, never `Date.now()` — see the file header. */
   updatedAt: number;
+  /** When she last turned down a quiz. Inside QUIZ_PUSH_MS the next task is read as them pushing
+   *  for it, and she gives in, annoyed. Cleared once she has. */
+  quizzedAt?: number;
 }
 
 /** The resting state: no history, no streak, and `idleSinceMoment` at zero so a brand-new chat must
@@ -242,6 +245,13 @@ export interface HookDirective {
   /** The extreme feeling of hers that slips into this reply, stated at the recency edge
    *  (persona/policy.ts renderDriftAnchor). Never on a quiet turn. */
   slip?: string;
+  /** A task turn that is a quiz a small child could pass, put to her as a test (persona/idle.ts
+   *  `quiz`), and which way she takes it: `refuse` holds the answer back, `roast` gives it with a
+   *  twist that makes it a dig at them. Only ever set on `task`; the edge states the law (policy.ts). */
+  quiz?: 'refuse' | 'roast';
+  /** The task right after she turned a quiz down: likely them pushing for it, so she answers it
+   *  this time, visibly annoyed, or answers whatever real thing they moved on to. */
+  quizPushed?: true;
   /** One of the turns her opinion on what they should do comes out as the move (PUSH_PERCENT of the
    *  hook and share turns that have a move open). Stated in the section and at the recency edge. */
   push?: true;
@@ -288,7 +298,7 @@ export function hookKindOpen(directive: HookDirective | null | undefined): boole
  *  switch, no quiet, the fourth kind reachable — has to be tellable from an idle turn that happened
  *  to leave the same three kinds open. It is also the bucket with no counter-case: a share turn
  *  cannot land anywhere else. */
-export type HookSelectReason = 'not_idle' | 'kill_switch' | 'affect_floor' | 'hook' | 'share' | 'take';
+export type HookSelectReason = 'not_idle' | 'kill_switch' | 'affect_floor' | 'hook' | 'share' | 'take' | 'quiz' | 'quiz_pushed';
 
 /** The receipt half. Names and numbers only — never her words, never a moment's text. */
 export interface HookSelectReport {
@@ -371,6 +381,18 @@ function repeatedTailKind(lastKinds: readonly HookKind[]): HookWord | null {
  *  nag, and one who never did would have none. */
 export const PUSH_PERCENT = 35;
 
+/** How long after she turns a quiz down the next task still reads as them pushing for it. */
+export const QUIZ_PUSH_MS = 15 * 60 * 1000;
+
+/** Of the quizzes, the share she answers at once with a dig instead of holding the answer back. Drawn,
+ *  because left to choose she takes the answer every time, and a no that never comes is no bit. */
+export const QUIZ_ROAST_PERCENT = 50;
+
+function quizDraw(now: number): number {
+  const n = Number.isFinite(now) ? Math.floor(Math.abs(now) / 1000) : 0;
+  return ((n % 1_000_003) * 104_729) % 100;
+}
+
 /** A stable per-turn draw in [0, 100) off the turn's clock, pure, so a test that fixes `now` fixes it. */
 function pushDraw(now: number): number {
   const n = Number.isFinite(now) ? Math.floor(Math.abs(now) / 1000) : 0;
@@ -385,6 +407,7 @@ export function selectHook(
   isGroup: boolean,
   now: number,
   take = false,
+  quiz = false,
 ): { directive: HookDirective; report: HookSelectReport } {
   // Never in a room (advice aimed at one person in front of everyone) and never on a slip turn, whose
   // one move is already spoken for. The branches below add their own: a share that is heavy gets
@@ -397,6 +420,24 @@ export function selectHook(
   const report = (reason: HookSelectReason, forbidden: HookWord[]): HookSelectReport =>
     ({ reason, idleLayer, forbidden, lastKinds: [...lastKinds] });
 
+  // Right after she said no to a quiz, the next ask is most likely them pushing for it, the same quiz
+  // again or a just answer. She gives in this time, annoyed; the law says so and also lets a real ask
+  // they moved on to be answered as itself.
+  const pushed = typeof state.quizzedAt === 'number' && now - state.quizzedAt >= 0 && now - state.quizzedAt < QUIZ_PUSH_MS;
+  if (shape === 'task' && pushed && !take) {
+    return {
+      directive: { idle: false, mode: 'task', quizPushed: true, forbidden: [], lateNight: affect.lateNight, moments: false, offerAllowed: false, playLevel: computePlayLevel('hook', affect), englishLooseness: affect.englishLooseness as 0 | 1 | 2 | 3 | undefined },
+      report: report('quiz_pushed', []),
+    };
+  }
+  if (shape === 'task' && quiz) {
+    // Something a small child could answer, asked to see if she can. Still a task by mode, so nothing
+    // is hooked on, but the answer is a no, and the jester gets to say it at her mood's reach.
+    return {
+      directive: { idle: false, mode: 'task', quiz: quizDraw(now) < QUIZ_ROAST_PERCENT ? 'roast' : 'refuse', forbidden: [], lateNight: affect.lateNight, moments: false, offerAllowed: false, playLevel: computePlayLevel('hook', affect), englishLooseness: affect.englishLooseness as 0 | 1 | 2 | 3 | undefined },
+      report: report('quiz', []),
+    };
+  }
   if (shape === 'task' && take) {
     // They asked what she thinks. Still a task (the answer is owed and nothing is hooked on), but
     // the answer is hers, so the play dial reads her mood the way an idle turn's does.
@@ -580,6 +621,7 @@ export function recordHook(
   shape: TurnKind,
   momentOffered: boolean,
   now: number,
+  quiz?: 'refused' | 'pushed',
 ): HookState {
   const kind: HookKind = emitted && (HOOK_WORDS as readonly string[]).includes(emitted) ? emitted : 'none';
   const idle = shape === 'idle';
@@ -590,6 +632,9 @@ export function recordHook(
     idleStreak: idle ? state.idleStreak + 1 : 0,
     idleSinceMoment: momentOffered ? 0 : idle ? state.idleSinceMoment + 1 : state.idleSinceMoment,
     updatedAt: now,
+    // A refusal stamps the clock the next turn reads; giving in clears it. Anything else keeps it,
+    // and QUIZ_PUSH_MS lets it lapse on its own.
+    ...(quiz === 'refused' ? { quizzedAt: now } : quiz === 'pushed' || state.quizzedAt === undefined ? {} : { quizzedAt: state.quizzedAt }),
   };
 }
 

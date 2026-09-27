@@ -61,6 +61,7 @@ export const IDLE_CLASSIFY_PROMPT = [
   'stall — a greeting, an acknowledgement, a sign-off, a laugh, a filler: it asks for nothing and tells nothing.',
   "share — it tells the assistant something about the person's own day, life, plans or feelings, and asks for nothing.",
   "take — it asks for the assistant's own opinion, taste, feeling or experience, with or without a question mark, and nothing that has to be looked up or done.",
+  'quiz means something so easy a small child could answer or do it, put to the assistant only to test whether it can. If the message names anyone else it is for, a child, a friend, homework, it is ask.',
   'ask — it asks for something to be looked up, worked out or done, gives an instruction, or carries a fact the assistant must act on.',
   'unclear — you cannot tell.',
 ].join('\n');
@@ -113,6 +114,7 @@ export function readIdleVerdict(text: string | null | undefined): IdleVerdict {
   if (word.startsWith('share')) return 'share';
   if (word.startsWith('ask')) return 'ask';
   if (word.startsWith('take')) return 'take';
+  if (word.startsWith('quiz')) return 'quiz';
   if (word.startsWith('unclear')) return 'unclear';
   // Anything else (an empty answer from a starved reasoning model, a sentence) is not a reading.
   return 'failed';

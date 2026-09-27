@@ -316,9 +316,13 @@ import type { StoredMessage, UserProfile } from '../../db/types.js';
  *
  * Then **+222**, variety (191,992 → 192,214), policy.ts and Context.md: the caps examples widen,
  * the shout used last is spent, and the example replies stop opening on wait or what.
+ *
+ * Then **+879**, quizzes (192,214 → 193,093), policy.ts alone: she is a prodigy and a question a
+ * small child could answer, put to her as a test, gets a no or an answer with a dig the first time,
+ * never a bare one, and an annoyed answer when they push; a fact they need is still answered.
  */
-const CORPUS_CHARS = 192_214;
-const CORPUS_SHA256 = '18ff757ce1f5404808cb47568a7541278cf9f2f0540ebb4fbac55c4708be9b9a';
+const CORPUS_CHARS = 193_093;
+const CORPUS_SHA256 = 'cf9a0b0ef4199cad1702ff1545870e66972ca46177b03762412fda6954860d5c';
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 

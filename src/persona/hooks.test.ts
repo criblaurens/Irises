@@ -30,7 +30,7 @@ import {
   HOOK_CLAMP, HOOK_HEADING, HOOK_LEAD, HOOK_OPEN_LINE, HOOK_NONE_OPEN, HOOK_LATE_LINE,
   MOMENTS_LEAD, QUIET_HEADING, QUIET_LAW,
   SHARE_HEADING, SHARE_LEAD, SHARE_OPEN_LINE, SHARE_QUESTION_LINE, SHARE_NONE_OPEN, SHARE_LATE_LINE,
-  LOOSE_LEVEL_LINES, PUSH_LINE, PUSH_PERCENT,
+  LOOSE_LEVEL_LINES, PUSH_LINE, PUSH_PERCENT, QUIZ_PUSH_MS, QUIZ_ROAST_PERCENT,
   type HookAffectInput, type HookDirective, type HookKind, type HookState, type HookWord,
   type TurnKind,
 } from './hooks.js';
@@ -953,4 +953,27 @@ test('a push turn: PUSH_PERCENT of turns carry it, never in a room, on a heavy s
   assert.ok(renderDriftAnchor('share', 0, undefined, true).endsWith(PUSH_BULLET));
   assert.ok(!renderDriftAnchor('quiet', 0, undefined, true).includes(PUSH_BULLET));
   assert.ok(!renderDriftAnchor('task', 0, undefined, true).includes(PUSH_BULLET));
+});
+
+// ══ 11. Quizzes ═══════════════════════════════════════════════════════════════
+
+test('a quiz is refused, the push right after it is answered annoyed, and the clock lapses', () => {
+  const quiz = selectHook(state(), 'task', 'classify', OPEN, false, T0, false, true).directive;
+  assert.ok(quiz.quiz === 'refuse' || quiz.quiz === 'roast');
+  assert.equal(quiz.mode, 'task');
+  // A hundred consecutive seconds visit every residue of the draw once: the split is the constant.
+  const roasts = Array.from({ length: 100 }, (_, i) => selectHook(state(), 'task', 'classify', OPEN, false, T0 + i * 1000, false, true).directive.quiz)
+    .filter(q => q === 'roast').length;
+  assert.equal(roasts, QUIZ_ROAST_PERCENT);
+  const after = recordHook(state(), undefined, 'task', false, T0, 'refused');
+  assert.equal(after.quizzedAt, T0);
+  // The next task inside the window is a push, whether it is the same quiz again or a just answer.
+  assert.equal(selectHook(after, 'task', 'classify', OPEN, false, T0 + 60_000, false, true).directive.quizPushed, true);
+  assert.equal(selectHook(after, 'task', 'veto', OPEN, false, T0 + 60_000).directive.quizPushed, true);
+  // A laugh in between is not a push, and neither is a task after the window.
+  assert.equal(selectHook(after, 'idle', 'fast_path', OPEN, false, T0 + 60_000).directive.quizPushed, undefined);
+  assert.equal(selectHook(after, 'task', 'veto', OPEN, false, T0 + QUIZ_PUSH_MS).directive.quizPushed, undefined);
+  // Giving in clears it.
+  assert.equal(recordHook(after, undefined, 'task', false, T0 + 60_000, 'pushed').quizzedAt, undefined);
+  assert.equal(recordHook(after, undefined, 'idle', false, T0 + 60_000).quizzedAt, T0);
 });

@@ -71,7 +71,7 @@ export type TurnKind = typeof TURN_KINDS[number];
  *  the fallback is a seam, and a caller that wires a different classifier still has to answer this
  *  question in these words. `share` is the one that carries the bid — a message that TELLS her
  *  something and asks for nothing — and it is the reading `stall` used to swallow. */
-export type IdleVerdict = 'stall' | 'share' | 'ask' | 'take' | 'unclear' | 'failed';
+export type IdleVerdict = 'stall' | 'share' | 'ask' | 'take' | 'quiz' | 'unclear' | 'failed';
 
 /** Which layer decided, for the receipt (`hooks:select` carries it, persona/hooks.ts). Four values,
  *  disjoint and exhaustive: `veto` a structural fact, `fast_path` the English examples, `classify`
@@ -472,6 +472,9 @@ export interface IdleReading {
   /** A task turn whose ask is her own opinion, taste, feeling or experience. Set only by the
    *  classifier's `take` verdict, and only on a task shape. */
   take?: boolean;
+  /** A task turn whose ask is something a small child could answer, put to her as a test. Set only by
+   *  the classifier's `quiz` verdict, and only on a task shape: she says no, and it stings. */
+  quiz?: boolean;
 }
 
 /**
@@ -526,7 +529,9 @@ export async function isIdleTurn(
       const word = String(await classify(t) ?? '').trim().toLowerCase();
       return word === 'take'
         ? { shape: 'task', layer: 'classify', signals, take: true }
-        : { shape: 'task', layer: 'classify', signals };
+        : word === 'quiz'
+          ? { shape: 'task', layer: 'classify', signals, quiz: true }
+          : { shape: 'task', layer: 'classify', signals };
     } catch {
       return { shape: 'task', layer: 'classify', signals };
     }
@@ -568,6 +573,7 @@ export async function isIdleTurn(
         : 'task';
     // A take with no question mark ("curious what you make of cats") is the same ask as one with it.
     if (word === 'take' && opts?.takeTurns === true) return { shape: 'task', layer: 'classify', signals, take: true };
+    if (word === 'quiz' && opts?.takeTurns === true) return { shape: 'task', layer: 'classify', signals, quiz: true };
     return { shape: shareOn || shape !== 'share' ? shape : 'task', layer: 'classify', signals };
   } catch {
     // A thrown call, a spent budget, an install with no classify lane, a deadline that fired. The

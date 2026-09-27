@@ -77,6 +77,7 @@ function coerceHookState(raw: unknown): HookState {
     idleStreak: countOr(s.idleStreak),
     idleSinceMoment: countOr(s.idleSinceMoment),
     updatedAt: stampOr(s.updatedAt),
+    ...(typeof s.quizzedAt === 'number' && Number.isFinite(s.quizzedAt) ? { quizzedAt: s.quizzedAt } : {}),
   };
 }
 

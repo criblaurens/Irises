@@ -134,7 +134,7 @@ test('the block describes no envelope field — the status contract owns the lis
 
 test('the heading is the literal three test files hard-code', () => {
   assert.equal(DRIFT_ANCHOR_HEADING, '## Still the same Irises, this far down');
-  assert.deepEqual([...DRIFT_MODES], ['task', 'hook', 'quiet', 'share', 'take', 'spent']);
+  assert.deepEqual([...DRIFT_MODES], ['task', 'hook', 'quiet', 'share', 'take', 'spent', 'quiz', 'roast', 'pushed']);
 });
 
 test('every mode and window renders heading, lead, then exactly six `- ` bullets', () => {
@@ -196,6 +196,9 @@ const MODE_LAWS: Record<DriftMode, string> = {
   share: 'they handed you something and asked for nothing',
   take: 'the reply is your take',
   spent: 'is too much today',
+  quiz: 'The answer itself is the one thing this reply never contains',
+  roast: 'turns the answer itself into a dig at them',
+  pushed: 'give it now and get it right, visibly annoyed',
 };
 
 /** How each law NAMES the turn it governs, which is the half a model actually navigates by: the
@@ -207,6 +210,9 @@ const MODE_OPENERS: Record<DriftMode, string> = {
   share: 'This is a share turn',
   take: 'This is a take turn',
   spent: 'You are running on empty',
+  quiz: 'This is a quiz',
+  roast: 'They quizzed you',
+  pushed: 'You just turned a quiz back on them',
 };
 
 test('each mode states its own law, and only its own', () => {

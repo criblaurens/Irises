@@ -1943,7 +1943,7 @@ export function buildSystemPromptSections(
   const windowChars = history?.reduce((n, m) => n + m.content.length, 0) ?? 0;
   const anchorMode: DriftMode =
     !hookDirective ? 'task'
-      : hookDirective.mode === 'task' ? (hookDirective.take ? 'take' : hookDirective.spent ? 'spent' : 'task')
+      : hookDirective.mode === 'task' ? (hookDirective.quiz === 'roast' ? 'roast' : hookDirective.quiz ? 'quiz' : hookDirective.quizPushed ? 'pushed' : hookDirective.take ? 'take' : hookDirective.spent ? 'spent' : 'task')
       : hookDirective.mode === 'share' ? 'share'
         : kindOpen ? 'hook' : 'quiet';
   const behaviorAnchor = renderDriftAnchor(anchorMode, windowChars, hookDirective?.slip, hookDirective?.push);
@@ -4934,7 +4934,8 @@ export async function processConvoResult(args: {
     // `shapeOf`) rather than threaded down from the gate: one answer to the question, on the one
     // struct this half of the turn actually holds. It is what tells the two ledger clocks a silence
     // from a turn where they said something — a share ends the streak the way a task does.
-    const next = recordHook(hookTurn.state, emitted?.hook_kind, shapeOf(hookTurn.directive), hookTurn.momentOffered, Date.now());
+    const quizStep = hookTurn.directive.quiz === 'refuse' ? 'refused' as const : hookTurn.directive.quizPushed ? 'pushed' as const : undefined;
+    const next = recordHook(hookTurn.state, emitted?.hook_kind, shapeOf(hookTurn.directive), hookTurn.momentOffered, Date.now(), quizStep);
     await saveHookState(chatId, handle ?? '', next, { ifForgetEpoch: hookTurn.forgetEpoch });
   }
 
@@ -4948,8 +4949,13 @@ export async function processConvoResult(args: {
   // from, and a call site that forgot to pass it would silently reset her state to the defaults on
   // every single turn. The read is the same cheap one `saveAffectState` already does to push the
   // mood trail, and the turn is serialized per chat (withChatLock), so nothing can land between them.
-  const affect = args.computed && emitted
-    ? mergeStatusWithDrift(emitted, args.computed, Date.now(), (await getAffectState(chatId)).last)
+  // Being quizzed like a child stings whatever the envelope said: a quiz turn never leaves her mood
+  // steady or lifted. Code's floor, because it is the one part of the ask a reply cannot show.
+  const affectIn = emitted && args.hooks?.directive.quiz && (emitted.mood_shift === 'steady' || emitted.mood_shift === 'lifted')
+    ? { ...emitted, mood_shift: 'dipped' as const }
+    : emitted;
+  const affect = args.computed && affectIn
+    ? mergeStatusWithDrift(affectIn, args.computed, Date.now(), (await getAffectState(chatId)).last)
     : null;
 
   // Refresh the durable memory dossier in the background (throttled; never blocks).

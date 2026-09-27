@@ -630,7 +630,7 @@ export async function chat(
         stranger: affectDirective.mask === 'stranger',
         slip: affectDirective.feelingSlip || undefined,
       },
-      isGroupChat, nowMs, idle.take === true,
+      isGroupChat, nowMs, idle.take === true, idle.quiz === true,
     );
     hookDirective = picked.directive;
     hookReport = picked.report;
@@ -653,6 +653,7 @@ export async function chat(
         moments: picked.directive.moments,
         shape: idle.shape,
         take: idle.take === true,
+        ...(idle.quiz ? { quiz: true } : {}),
         signals: [...idle.signals],
       },
     });
