@@ -46,10 +46,23 @@ const STRONG: RegExp[] = [
   /\b(my|the)\s+(inbox|email|emails|gmail|messages?|calendar|schedule|account|order|invoice|subscription)\b/i,
   // Retrieval-history questions answerable only from their records ("did I get X", "has Y replied").
   /\b(did (?:i|we)\b|has\b[^?]*\b(responded|replied|sent|arrived)|when did (?:i|we)\b)\b/i,
-  // Live/current quantitative asks — a real figure, not a definition.
-  /\b(how much|how many)\b/i,
   /\b(what'?s|what is)\s+(the\s+)?(status|latest|current|newest|price|cost|balance|total|value)\b/i,
 ];
+
+// Live/current quantitative asks — a real figure, not a definition. A figure needs a source only
+// when it lives outside the message and outside her: in the world, or in their records. One she can
+// work out from the words in front of her (the letters of a word they gave, arithmetic on numbers
+// they stated) or one about herself and them is hers to answer, and forcing it out threw away a
+// correct reply for an engine run.
+const QUANTITY_ASK = /\b(how much|how many)\b/i;
+const SELF_CONTAINED_QUANTITY = new RegExp([
+  // Counting inside a word or phrase they gave: a letter, letters, vowels, words, syllables, digits.
+  String.raw`\bhow many\s+(?:["'“]?[a-z]["'”]?(?:'?s)?|letters?|characters?|chars?|vowels?|consonants?|syllables?|words?|digits?)\s+(?:are\s+|is\s+)?(?:in|does|do)\b`,
+  // Arithmetic on numbers they stated.
+  String.raw`\bhow (?:much|many) (?:is|are)\s+\d[\d.,\s]*(?:[-+*/x×÷^%]|plus|minus|times|divided by)`,
+  // About her and them: "you" asked about "me"/"us" in the same clause.
+  String.raw`\bhow (?:much|many)\b[^?.!]*\b(?:u|you|ya)\b[^?.!]*\b(?:me|us)\b`,
+].join('|'), 'i');
 
 // A factual question about a NAMED entity (a proper noun that isn't the sentence-initial word) —
 // the shape a model will confidently fabricate an answer to. Two signals AND'd: a question word,
@@ -88,6 +101,7 @@ export function needsGrounding(text: string): GroundingNeed {
   if (core.length < 4) return 'no';                 // the message WAS just the ack/greeting
   if (NEGATIVE.test(core)) return 'no';             // terminology/math/greeting
   for (const re of STRONG) if (re.test(core)) return 'yes';
+  if (QUANTITY_ASK.test(core) && !SELF_CONTAINED_QUANTITY.test(core)) return 'yes';
   if (QUESTION_WORD.test(core) && PROPER_NOUN.test(core)) return 'yes'; // "who is X at <Named>?"
   if (PATH_TOKEN.test(core) && PATH_ASK.test(core)) return 'yes';       // "what's in ~/.hermes/skills?"
   return 'no';

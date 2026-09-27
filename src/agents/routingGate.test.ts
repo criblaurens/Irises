@@ -53,6 +53,22 @@ test('terminology / math / social are answered locally (no forced delegation)', 
   }
 });
 
+test('a figure she can work out from the message, or one about her and them, stays hers', () => {
+  for (const q of [
+    'how many r in strawberries',
+    "how many r's are in strawberry?",
+    'how many letters in mississippi',
+    'how much is 15% of 80',
+    'how much do u know me 1-100? how much do u comfortable with me',
+  ]) {
+    assert.equal(needsGrounding(q), 'no', `expected no for: ${q}`);
+  }
+  // ...while a figure that lives in the world or in their records still goes out.
+  for (const q of ["how many days till dana's wedding again", 'how many people live in jakarta', 'how much is a flight to bali']) {
+    assert.equal(needsGrounding(q), 'yes', `expected yes for: ${q}`);
+  }
+});
+
 test('a URL flips even an otherwise-definitional message to grounded', () => {
   assert.equal(needsGrounding('what does this page say? https://example.com/article'), 'yes');
 });
