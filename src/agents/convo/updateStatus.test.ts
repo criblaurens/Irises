@@ -6,7 +6,7 @@
 // states, its fallbacks and its one relayed command are pinned here rather than only measured.
 import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderUpdateStatus } from './shared.js';
+import { renderBuildBullet, renderUpdateStatus } from './shared.js';
 import { _resetCheckerForTests, _setChecksLiveForTests, type UpdateStatus } from '../../update/checker.js';
 import type { VersionInfo } from '../../update/version.js';
 
@@ -32,7 +32,7 @@ beforeEach(() => {
 test('an update waiting: the remote short sha, named as waiting on the server', () => {
   const out = renderUpdateStatus(VERSION, status({ remoteSha: '9ab3c7d'.padEnd(40, '0'), updateAvailable: true }), NOW);
   assert.match(out, /^## Your build and how you get updated \(facts; say them plainly if asked\)$/m);
-  assert.match(out, /^- You are running build 4f2a91c on branch main\.$/m);
+  assert.match(out, /^- You are running build 4f2a91c on branch main, right now\. This line is the only current one/m);
   assert.match(out, /^- A newer build \(9ab3c7d\) is waiting on the server\.$/m);
   assert.doesNotMatch(out, /No newer build/);
 });
@@ -74,7 +74,7 @@ test('no version stamp and no branch: the build line degrades instead of lying',
   assert.match(renderUpdateStatus(unknown, status(), NOW),
     /^- You can't tell which build you are running \(this install carries no version stamp\)\.$/m);
   const noBranch: VersionInfo = { ...VERSION, branch: null };
-  assert.match(renderUpdateStatus(noBranch, status(), NOW), /^- You are running build 4f2a91c\.$/m);
+  assert.match(renderUpdateStatus(noBranch, status(), NOW), /^- You are running build 4f2a91c, right now\. This line is the only current one/m);
 });
 
 test('the terminal command is relayed exactly, once, in backticks — and never a chat command', () => {
@@ -114,4 +114,13 @@ test('the last upgrade: what changed rides the section; an empty changelog adds 
   const out = renderUpdateStatus(VERSION, status(), NOW, receipt);
   assert.match(out, /^- Your person upgraded you to this build from build 1a2b3c4, 2 hours ago, and it changed you: Make replies shorter; Add a voice bank\./m);
   assert.equal(renderUpdateStatus(VERSION, status(), NOW, { ...receipt, changes: [] }), renderUpdateStatus(VERSION, status(), NOW));
+});
+
+test('a message about her version gets the current build restated at the edge, and nothing else does', () => {
+  const unknown: VersionInfo = { sha: null, shortSha: null, branch: null, builtAt: null, source: 'unknown' };
+  assert.match(renderBuildBullet(VERSION, 'btw what is the build number rn'), /^- Your build right now is 4f2a91c on branch main\./);
+  assert.match(renderBuildBullet(VERSION, 'what version are u now'), /4f2a91c/);
+  assert.equal(renderBuildBullet(VERSION, 'haha'), '');
+  assert.equal(renderBuildBullet(VERSION, undefined), '');
+  assert.equal(renderBuildBullet(unknown, 'what version are u'), '');
 });

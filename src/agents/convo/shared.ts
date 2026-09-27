@@ -1304,11 +1304,27 @@ function lastUpgradeLine(receipt: UpdateReceipt | null | undefined, now: number)
   return `- Your person upgraded you to this build${from}${when}, and it changed you: ${shown.join('; ')}${more}. These are their working notes on what is now different about how you behave and what you can do — if they mention updating you or ask what is new, you know what changed and say it in your own words, never read the notes out.`;
 }
 
+/** A message that touches her version, in English. Examples of the ask, not a law: a miss costs only
+ *  the edge line below, and the build section above still states the fact. */
+const BUILD_ASK = /\b(version|build|update[sd]?|upgrade[sd]?|sha|commit|release)\b/i;
+
+/**
+ * Her current build, restated at the recency edge on a turn that asks about it. The build section
+ * says it once, far up; her own older answers in the thread say an older one, closer to the edge,
+ * and live on 2026-09-27 she gave the stale build number back three times. '' when the message does
+ * not touch it or the install carries no stamp.
+ */
+export function renderBuildBullet(version: VersionInfo, incomingText?: string): string {
+  if (!version.shortSha || !incomingText || !BUILD_ASK.test(incomingText)) return '';
+  const on = version.branch ? ` on branch ${version.branch}` : '';
+  return `- Your build right now is ${version.shortSha}${on}. Any other build number in the thread or in your notes is an older one, so this is the one you give.`;
+}
+
 export function renderUpdateStatus(version: VersionInfo, status: UpdateStatus, now = Date.now(), lastUpgrade?: UpdateReceipt | null): string {
   const buildLine = version.shortSha
     ? version.branch
-      ? `- You are running build ${version.shortSha} on branch ${version.branch}.`
-      : `- You are running build ${version.shortSha}.`
+      ? `- You are running build ${version.shortSha} on branch ${version.branch}, right now. This line is the only current one: a build number anywhere else, earlier in the thread, in your notes or in a look you ran, is an older build and wrong today.`
+      : `- You are running build ${version.shortSha}, right now. This line is the only current one: a build number anywhere else, earlier in the thread, in your notes or in a look you ran, is an older build and wrong today.`
     : "- You can't tell which build you are running (this install carries no version stamp).";
   // The gate comes FIRST: with no checker armed, `updateAvailable` is a stale in-memory guess and
   // either answer built from it would be a claim she cannot stand behind.
@@ -1956,7 +1972,8 @@ export function buildSystemPromptSections(
         curious: hookDirective.dodges.curious != null && visible(hookDirective.dodges.curious),
       }
     : undefined;
-  const behaviorAnchor = renderDriftAnchor(anchorMode, windowChars, hookDirective?.slip, hookDirective?.push, dodgeLines);
+  const buildBullet = renderBuildBullet(updateSnapshot.current, incomingText);
+  const behaviorAnchor = renderDriftAnchor(anchorMode, windowChars, hookDirective?.slip, hookDirective?.push, dodgeLines) + (buildBullet ? `\n${buildBullet}` : '');
 
   // The bubble guidance below is interpolated from the constants the pipeline actually
   // ENFORCES (pipeline/bubbles.ts, pipeline/bubbleJson.ts), never spelled out: what the model is
