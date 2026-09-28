@@ -796,7 +796,7 @@ export const HOOK_NONE_OPEN = 'No kind is open this turn. Short and flat, and le
 /** The register line, rendered after the open/none line whenever it is late where they are. It says
  *  how BIG the reply is and never what is in it: the kinds above still pick the content, and the
  *  last clause is the whole anti-repeat intervention for a shape she used last night. */
-export const HOOK_LATE_LINE = 'It is late where they are: one short bubble, or a tapback, and nothing heavy. Same rules as any idle turn, at a lower volume, and never the line you sent them last night.';
+export const HOOK_LATE_LINE = 'It is late where they are: one short bubble that hands them something to answer or do, or a tapback, and nothing heavy. Same rules as any idle turn, at a lower volume, and never the line you sent them last night.';
 
 export const MOMENTS_LEAD = 'Kept about them, in case a callback fits. Retell one in fresh words, never read it out, never its date, never more than one.';
 
@@ -880,9 +880,9 @@ export const SLIP_TANGENT_LINE = 'This turn the tangent is you: how {feeling} yo
  *  should do. The recency edge carries the same turn as a bubble (persona/policy.ts PUSH_BULLET). */
 export const PUSH_LINE = 'This turn, whichever kind you take, it tells them what to do: your opinion on their next step, said straight.';
 
-export const LOW_LINE = 'You are low right now. Whatever you ask, ask it lazy: a few words, no effort spent dressing it up, and it still keeps its question mark.';
+export const LOW_LINE = 'You are low right now: short and lazy, and the few words you spend go on a lazy question or a lazy push for them, no effort dressing it up, the question still keeping its question mark.';
 
-export const SHARE_LATE_LINE ='It is late where they are: one short bubble and nothing heavy. Same move, lower volume.';
+export const SHARE_LATE_LINE ='It is late where they are: one short bubble that hands them something to answer or do, and nothing heavy. Same move, lower volume.';
 
 /** The allowed kinds as English — `a judgment, a callback or a tangent` on a hook turn, and the same
  *  list with `or a question` at the end of it on a share turn. An oxford-less list because it is a

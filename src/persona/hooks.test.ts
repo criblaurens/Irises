@@ -508,7 +508,7 @@ test('a late idle turn renders the open line and the late line, and says nothing
     '## This turn may carry one hook (INTERNAL)',
     'They sent you nothing, so nothing of theirs comes back, not their greeting, not their word. This is the one turn that earns a hook, and it earns exactly one.',
     'Open to you this turn: a judgment, a callback, a tangent or a question. One of them, never two, never a kind not named here.',
-    'It is late where they are: one short bubble, or a tapback, and nothing heavy. Same rules as any idle turn, at a lower volume, and never the line you sent them last night.',
+    'It is late where they are: one short bubble that hands them something to answer or do, or a tapback, and nothing heavy. Same rules as any idle turn, at a lower volume, and never the line you sent them last night.',
     'Play level: dry. Light touch only, close to literal, no long bridges.',
     'Never mention notes, memory, a read you were handed, or that you were told which kind to use.',
   ].join('\n'));
@@ -670,7 +670,7 @@ test('the every-kind-spoken-for block, with the late line, renders char-for-char
     '## This turn may carry one hook (INTERNAL)',
     'They sent you nothing, so nothing of theirs comes back, not their greeting, not their word. This is the one turn that earns a hook, and it earns exactly one.',
     'No kind is open this turn. Short and flat, and let the beat pass.',
-    'It is late where they are: one short bubble, or a tapback, and nothing heavy. Same rules as any idle turn, at a lower volume, and never the line you sent them last night.',
+    'It is late where they are: one short bubble that hands them something to answer or do, or a tapback, and nothing heavy. Same rules as any idle turn, at a lower volume, and never the line you sent them last night.',
     'Never mention notes, memory, a read you were handed, or that you were told which kind to use.',
   ].join('\n'));
 });
@@ -781,7 +781,7 @@ test('the presence case still tells her to speak, and takes the late register', 
     '## This turn is a share (INTERNAL)',
     'They handed you something and asked for nothing. A receipt turns it away; the reply turns toward it, one move about the thing itself.',
     'No kind is open this turn. Take what they said plainly, one short bubble about the thing itself, and stop.',
-    'It is late where they are: one short bubble and nothing heavy. Same move, lower volume.',
+    'It is late where they are: one short bubble that hands them something to answer or do, and nothing heavy. Same move, lower volume.',
     'Never mention notes, memory, a read you were handed, or that you were told which kind to use.',
   ].join('\n'));
   // No variant of this block, however narrow, offers her the exit the other two modes have.

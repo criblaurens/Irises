@@ -1146,7 +1146,7 @@ export function renderActiveOps(activeOps: ActiveOps[], ended: readonly EndedOps
  * the same prompt as the transcript's own stamps and the clock block — one of them rendering in the
  * host's zone is a several-hour disagreement the model reads as fact.
  */
-export function renderReplyOrder(history: StoredMessage[], incomingText: string, hasTappedReply: boolean, tz = DEFAULT_TZ): string {
+export function renderReplyOrder(history: StoredMessage[], incomingText: string, hasTappedReply: boolean, tz = DEFAULT_TZ, idleTurn = false): string {
   if (hasTappedReply) return '';
   let tail = 0;
   for (let i = history.length - 1; i >= 0 && history[i].role === 'assistant'; i--) tail++;
@@ -1157,7 +1157,10 @@ export function renderReplyOrder(history: StoredMessage[], incomingText: string,
     `Their message arrived after your run of ${tail === 1 ? 'one bubble' : `${tail} bubbles`}${stamp ? ` (your last one at ${stamp})` : ''} — read it against those, in send order. It answers what was already on their screen, and not necessarily your very last bubble.`,
   ];
   const words = incomingText.trim().split(/\s+/).filter(Boolean).length;
-  if (words > 0 && words <= 4) {
+  // The closing read exists so an "ok" is never taken as consent to something she named. On an idle or
+  // share turn that case cannot arise (a question of hers still standing makes it a task), and there
+  // the line read as "they are wrapping up", so she wrapped up too with a lone comment.
+  if (words > 0 && words <= 4 && !idleTurn) {
     lines.push('And it\'s only a few words: a reply this short most likely CLOSES THE LOOP on what you delivered — "thanks, got it" — not new work, and not consent to anything else you named.');
   }
   return lines.join('\n');
@@ -1580,8 +1583,9 @@ export function buildSystemPromptSections(
   // sections; the reply-order line below is therefore '' exactly when the send-order craft has
   // nothing to do, which is what makes it the honest gate for that page.
   const tapped = hasTappedReply(chatContext);
+  const idleTurn = !!personaTurn?.hooks && hooksEnabled() && (personaTurn.hooks.mode === 'hook' || personaTurn.hooks.mode === 'share');
   const replyOrderLine = history?.length && incomingText
-    ? renderArrivalGap(chatContext?.arrivals, tapped) || renderReplyOrder(history, incomingText, tapped, tz)
+    ? renderArrivalGap(chatContext?.arrivals, tapped) || renderReplyOrder(history, incomingText, tapped, tz, idleTurn)
     : '';
   const threadBlock = renderThreadForPrompt(thread?.offer ?? null, thread?.outcomeAsk ?? null);
   const craftGate: ModuleGateInput = {
