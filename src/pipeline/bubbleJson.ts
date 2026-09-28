@@ -635,6 +635,10 @@ export function lastBubbleReport(chatId: string): BubbleReport | undefined {
   return lastReports.get(chatId);
 }
 
+/** Words only the reply contract uses: "bubble" as a unit of her own output (the everyday bubble tea,
+ *  wrap, bath and gum are exempt), the person called "the user", and the status block's field names. */
+const REPLY_MACHINERY = /\bbubbles?\b(?!\s*(?:tea|wrap|bath|gum))|\bthe user\b|\bmeta_prompt\b|\bmood_label\b/i;
+
 export function parseReply(raw: string | null | undefined): ParsedReply {
   if (raw == null) return { legacyText: null, wasEnvelope: false, hardCapped: false };
   const env = parseEnvelope(raw);
@@ -646,6 +650,15 @@ export function parseReply(raw: string | null | undefined): ParsedReply {
     // floors take over, and wasEnvelope=false still drives the corrective retry upstream.
     if (raw.includes('"tool_calls"') || raw.includes("'tool_calls'")) {
       console.warn('[bubbles] unparseable reply mentions tool_calls — suppressing it instead of texting JSON shrapnel');
+      return { legacyText: null, wasEnvelope: false, hardCapped: false };
+    }
+    // Same floor for the two other shapes a failed envelope takes. Text that opens with a brace is
+    // the envelope itself, cut or broken (a lone "{" included), never something she would text.
+    // Text that speaks in her own reply-format vocabulary (the bubble as the unit she writes in,
+    // "the user", the status fields) is her drafting notes about the chat, written ABOUT the person
+    // rather than TO them. Neither is a reply; the silent-turn floor answers instead.
+    if (/^\s*\{/.test(raw) || REPLY_MACHINERY.test(raw)) {
+      console.warn('[bubbles] unparseable reply is envelope debris or drafting notes — suppressing it');
       return { legacyText: null, wasEnvelope: false, hardCapped: false };
     }
     // Every user-facing persona is on the JSON envelope now, so a non-JSON reply reaching here is a

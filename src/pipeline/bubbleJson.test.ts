@@ -337,6 +337,24 @@ test('unparseable garble that mentions tool_calls is suppressed, never texted as
   assert.equal(r.wasEnvelope, false);
 });
 
+test('a lone brace or drafting notes about the chat are suppressed; plain voice prose still ships', () => {
+  for (const raw of [
+    '{',
+    '{"confidence_level":',
+    "He's answering my question about the project name. I should react to it landing, one short bubble. No second bubble",
+    'the user wants a quick answer, keep it light',
+  ]) {
+    const r = parseReply(raw);
+    assert.equal(r.legacyText, null, `must not ship: ${raw}`);
+    assert.equal(r.wasEnvelope, false, 'still drives the corrective retry');
+  }
+  for (const raw of [
+    'okay the messy bun stays\n\neverything else is just numbers tbh',
+    'bubble tea after work?',
+    'he said what?? lmao',
+  ]) assert.equal(parseReply(raw).legacyText, raw);
+});
+
 test('wasEnvelope is the retry signal: true for any valid envelope, false for prose/empty', () => {
   assert.equal(parseReply('{"confidence_level":85,"bubbles":[]}').wasEnvelope, true);
   assert.equal(parseReply('just prose').wasEnvelope, false);
