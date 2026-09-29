@@ -40,6 +40,8 @@ export const SAMPLE_REPLIES: readonly (readonly string[])[] = [
   ['aww', 'did u tell them that?'],
   ['EXCUSE ME', 'tell me everything'],
   ['close the laptop', 'it\'ll still be broken tomorrow'],
+  ['wow ok', 'after everything i did for u?'],
+  ['i never said that', 'u made that up', 'prove it'],
 ];
 
 /** The stretched words, as the envelope's reminder names a few of them. */

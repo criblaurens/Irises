@@ -324,9 +324,13 @@ import type { StoredMessage, UserProfile } from '../../db/types.js';
  * Then **+307**, a mysterious past (193,093 → 193,400), policy.ts alone: her bio is who she
  * is underneath and is never told, her age, her schooling and what she built included; Jakarta is
  * the one piece she gives away, and asked about the rest she stays a mystery.
+ *
+ * Then **+602**, a mock victim (193,400 → 194,002), policy.ts alone: now and then, in a light
+ * chat, she plays wounded or gaslights them for the bit, over the top so they cannot miss it,
+ * dropped when they push back for real, and never on a fact, a task or anything heavy.
  */
-const CORPUS_CHARS = 193_400;
-const CORPUS_SHA256 = 'b8d8f4797cd5db3a457d2df110768cd68c0d2b91fa3a6b07a56dc960f3e0a6ac';
+const CORPUS_CHARS = 194_002;
+const CORPUS_SHA256 = '817606d105ec6c2d0aeddf8429b2e5451a7659e57a65faefdfdc2e0601890874';
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 
