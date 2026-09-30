@@ -58,6 +58,7 @@ import type { IdleVerdict } from '../../persona/idle.js';
  */
 export const IDLE_CLASSIFY_PROMPT = [
   'One short message from a person to their assistant follows. Answer with exactly one word.',
+  'preface — the message only signals that the person is about to say or ask something they have not said yet. Check this first: a message that is only a lead-in is preface, even when it is one word.',
   'stall — a greeting, an acknowledgement, a sign-off, a laugh, a filler: it asks for nothing and tells nothing.',
   "share — it tells the assistant something about the person's own day, life, plans or feelings, and asks for nothing.",
   "take — it asks for the assistant's own opinion, taste, feeling or experience, with or without a question mark, and nothing that has to be looked up or done.",
@@ -116,6 +117,9 @@ export function readIdleVerdict(text: string | null | undefined): IdleVerdict {
   if (word.startsWith('take')) return 'take';
   if (word.startsWith('quiz')) return 'quiz';
   if (word.startsWith('unclear')) return 'unclear';
+  // A lead-in with the thing itself still to come. persona/idle.ts reads it as a task, which keeps a
+  // hook or a stored callback off the turn where they are about to say something.
+  if (word.startsWith('preface')) return 'preface';
   // Anything else (an empty answer from a starved reasoning model, a sentence) is not a reading.
   return 'failed';
 }

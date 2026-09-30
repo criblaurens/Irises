@@ -54,6 +54,7 @@ test('a one-word answer is read past its punctuation, and anything unknown is a 
   assert.equal(readIdleVerdict('  STALL.\n'), 'stall', 'a lane that punctuates has still answered');
   assert.equal(readIdleVerdict('share'), 'share');
   assert.equal(readIdleVerdict(' Share.\n'), 'share', 'the fourth word is read exactly like the other three');
+  assert.equal(readIdleVerdict('preface'), 'preface');
   assert.equal(readIdleVerdict('Quiz.'), 'quiz', 'a question put to her as a test has its own word');
   assert.equal(readIdleVerdict('ask'), 'ask');
   assert.equal(readIdleVerdict('unclear'), 'unclear');

@@ -183,6 +183,47 @@ function lastTimed(history: TimedTurn[]): TimedTurn | undefined {
   return undefined;
 }
 
+/** A silence this long ends a sitting: what came before it is an earlier stretch of talk. */
+const SITTING_GAP_MS = 6 * HOUR;
+
+/**
+ * Where the current sitting begins, read off the gaps in the thread (`history` is chronological).
+ * `start` is the first message of this sitting, or undefined when THIS message opens it; `endedAt`
+ * is the last message of the sitting before. Undefined when the whole visible thread is one sitting.
+ *
+ * Why it exists (2026-09-30): a day-old topic stayed live because every gap the timing block
+ * reported was the last one, so after one fresh exchange yesterday's thread read as current and a
+ * vague follow-up bound to it.
+ */
+function currentSitting(history: TimedTurn[], nowMs: number): { start?: number; endedAt: number } | undefined {
+  const at = history.map(t => t.at).filter((a): a is number => a != null && Number.isFinite(a));
+  if (!at.length) return undefined;
+  if (nowMs - at[at.length - 1] >= SITTING_GAP_MS) return { endedAt: at[at.length - 1] };
+  for (let i = at.length - 1; i > 0; i--) {
+    if (at[i] - at[i - 1] >= SITTING_GAP_MS) return { start: at[i], endedAt: at[i - 1] };
+  }
+  return undefined;
+}
+
+const EXPIRED_REFERENCE = 'When their message refers back to something without naming it, it means something in this sitting. If nothing in this sitting fits, ask one short question with your guess inside before you answer it or start any look-up.';
+
+/**
+ * The one line that names where the current sitting began and what a vague reference may bind to,
+ * or '' when the visible thread is one sitting. Rendered by the turn-focus block at the recency edge
+ * (convo/turnFocus.ts `sitting`): replayed in the timing block it moved nothing, at the edge it
+ * stopped stale look-ups on an unnamed follow-up.
+ */
+export function sittingLine(history: TimedTurn[], nowMs = Date.now(), tz = DEFAULT_TZ): string {
+  const sitting = currentSitting(history, nowMs);
+  if (!sitting) return '';
+  const quiet = describeGap(nowMs - sitting.endedAt);
+  const label = sitting.start != null ? timestampLabel(sitting.start, tz) : '';
+  if (!label) {
+    return `This message opens a new sitting; everything above belongs to one that went quiet ${quiet} ago, and its topics have expired. ${EXPIRED_REFERENCE}`;
+  }
+  return `This sitting began at ${label}; everything stamped earlier belongs to a sitting that went quiet ${quiet} ago, and its topics have expired. ${EXPIRED_REFERENCE}`;
+}
+
 /**
  * The precomputed "## Conversation timing" block for a system prompt / brief. `history` is the
  * stored thread BEFORE the current inbound message (the Convo flow fetches before it appends), so

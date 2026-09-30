@@ -108,6 +108,13 @@ test('renderTurnFocus restates the message, names the shape, and closes on the a
 // long thread a small model asked "what do you know about me" hands back HER bio as theirs. The line
 // names both people at the recency edge so "me/my/I" in the restated message can only be THEM.
 
+test('the sitting line sits directly above the answer-THIS line, and is absent when empty', () => {
+  const base = { text: 'any update on that', hits: [] };
+  const lines = renderTurnFocus({ ...base, sitting: 'SITTING' }).split('\n');
+  assert.equal(lines[lines.length - 2], 'SITTING');
+  assert.equal(renderTurnFocus({ ...base, sitting: '' }), renderTurnFocus(base));
+});
+
 test('the who-line names both people and sits directly above the restated message', () => {
   const block = renderTurnFocus({ text: 'what do u know about me', hits: [], who: { them: 'Rivian Pratama' } });
   const lines = block.split('\n');

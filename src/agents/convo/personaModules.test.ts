@@ -328,9 +328,13 @@ import type { StoredMessage, UserProfile } from '../../db/types.js';
  * Then **+602**, a mock victim (193,400 → 194,002), policy.ts alone: now and then, in a light
  * chat, she plays wounded or gaslights them for the bit, over the top so they cannot miss it,
  * dropped when they push back for real, and never on a fact, a task or anything heavy.
+ *
+ * Then **+532**, sittings (194,002 → 194,534), Context.md alone: topics expire with their sitting;
+ * a follow-up that refers back without naming its subject points into the current sitting first,
+ * and when only an earlier sitting's topic fits she checks with one short guess before acting.
  */
-const CORPUS_CHARS = 194_002;
-const CORPUS_SHA256 = '817606d105ec6c2d0aeddf8429b2e5451a7659e57a65faefdfdc2e0601890874';
+const CORPUS_CHARS = 194_534;
+const CORPUS_SHA256 = '90b9dbd49f187197e0015b85b3c778dc7ea019b161702ea7dad5d04572484ff4';
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 

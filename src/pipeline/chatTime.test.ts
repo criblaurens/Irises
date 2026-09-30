@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { dateTimeInZone } from './zonedTime.js';
 import {
   timestampLabel, timestampMarker, stampContent, stripTimestampMarker,
-  classifyGap, describeGap, renderConversationTiming, conversationTimingLine,
+  classifyGap, describeGap, renderConversationTiming, conversationTimingLine, sittingLine,
 } from './chatTime.js';
 
 // Mon Jul 6 2026, 9:14 PM America/Chicago (CDT) — the reference "now" for most tests.
@@ -143,6 +143,29 @@ test('late-night and weekend colour appear when the clock says so', () => {
   const block = renderConversationTiming([{ role: 'assistant', at: lateSat - 2 * HOUR }], lateSat);
   assert.match(block, /Late night/);
   assert.match(block, /weekend/);
+});
+
+// ── sittingLine ──────────────────────────────────────────────────────────────
+
+test('an earlier sitting is named by where the current one began, with the unnamed-reference check', () => {
+  // Yesterday evening's thread, then a fresh sitting this evening that is 25 minutes old.
+  const yesterday = NOW - DAY;
+  const line = sittingLine([
+    { role: 'user', at: yesterday }, { role: 'assistant', at: yesterday + MIN },
+    { role: 'user', at: NOW - HOUR }, { role: 'assistant', at: NOW - 25 * MIN },
+  ], NOW);
+  assert.match(line, /This sitting began at Mon, Jul 6, 8:14 PM/);
+  assert.match(line, /went quiet about a day ago, and its topics have expired/);
+  assert.match(line, /before you answer it or start any look-up/);
+});
+
+test('a message after a long silence opens a new sitting', () => {
+  assert.match(sittingLine([{ role: 'assistant', at: NOW - 8 * HOUR }], NOW), /This message opens a new sitting/);
+});
+
+test('one continuous sitting carries no sitting line', () => {
+  assert.equal(sittingLine([{ role: 'user', at: NOW - 3 * HOUR }, { role: 'assistant', at: NOW - 2 * HOUR }], NOW), '');
+  assert.equal(sittingLine([], NOW), '');
 });
 
 test('a trailing turn without `at` degrades to the clock phrase, never NaN', () => {

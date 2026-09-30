@@ -71,7 +71,7 @@ export type TurnKind = typeof TURN_KINDS[number];
  *  the fallback is a seam, and a caller that wires a different classifier still has to answer this
  *  question in these words. `share` is the one that carries the bid — a message that TELLS her
  *  something and asks for nothing — and it is the reading `stall` used to swallow. */
-export type IdleVerdict = 'stall' | 'share' | 'ask' | 'take' | 'quiz' | 'unclear' | 'failed';
+export type IdleVerdict = 'stall' | 'share' | 'ask' | 'take' | 'quiz' | 'preface' | 'unclear' | 'failed';
 
 /** Which layer decided, for the receipt (`hooks:select` carries it, persona/hooks.ts). Four values,
  *  disjoint and exhaustive: `veto` a structural fact, `fast_path` the English examples, `classify`
@@ -402,6 +402,24 @@ export function followUpOnly(facts: IdleFacts): boolean {
  * list may judge, and a message that tokenized to nothing must not pass "every token is an example"
  * vacuously.
  */
+/**
+ * Lead-ins: a short message that ENDS on one of these is taking the floor for something still to
+ * come, so it is a task turn and earns no hook and no stored callback. Examples, not a law, exactly
+ * like LEAF_EXAMPLES: a miss falls through to the classifier's `preface` word, and a wrong hit costs
+ * one plain reply, the gate's safe side.
+ */
+export const PREFACE_EXAMPLES: readonly string[] = ['btw', 'wait', 'anw', 'anyway', 'anyways', 'also', 'so'];
+const PREFACE_SET: ReadonlySet<string> = new Set(PREFACE_EXAMPLES);
+const PREFACE_MAX_WORDS = 4;
+
+function fastPathPreface(text: string): boolean {
+  if (!fastPathCanRead(text)) return false;
+  const tokens = words(text);
+  if (!tokens.length || tokens.length > PREFACE_MAX_WORDS) return false;
+  const leaf = leafTokens();
+  return PREFACE_SET.has(tokens[tokens.length - 1]) && tokens.every(tok => PREFACE_SET.has(tok) || leaf.has(tok));
+}
+
 function fastPathStall(text: string, signals: readonly string[]): boolean {
   if (signals.length) return false;
   if (!fastPathCanRead(text)) return false;
@@ -541,6 +559,8 @@ export async function isIdleTurn(
     // veto. This one line is the whole of the flag's off path in this layer.
     || (!shareOn && signals.length > 0);
   if (vetoed) return { shape: 'task', layer: 'veto', signals };
+  // A lead-in with the thing itself still coming ("cool btw"): the next message is the turn.
+  if (fastPathPreface(t)) return { shape: 'task', layer: 'fast_path', signals };
 
   const relaxed = shareOn && followUpOnly(facts);
   // The examples, under their three conditions (`fastPathStall` above states all three and why each

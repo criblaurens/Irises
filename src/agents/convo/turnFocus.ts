@@ -99,6 +99,9 @@ export interface TurnFocusInput {
    * held to (no dashes, no colons), so the counterweight never models the punctuation it forbids.
    */
   who?: { them: string | null };
+  /** Where the current sitting began and what an unnamed reference may bind to (chatTime.ts
+   *  `sittingLine`), computed by the caller. Absent or '' renders nothing. */
+  sitting?: string;
 }
 
 /** How much of their message is restated. The block is a RESTATEMENT, not the message itself — the
@@ -400,6 +403,7 @@ export function renderTurnFocus(input: TurnFocusInput): string {
     `Shape: ${classifyTurnShape(message)}`,
     ...(turnLine ? [turnLine] : []),
     `${HITS_LABEL}${held}`,
+    ...(input.sitting ? [input.sitting] : []),
     CLOSER,
   ].join('\n');
 }

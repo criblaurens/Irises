@@ -187,6 +187,19 @@ test('endsInQuestion reads her last turn in any script, through a closing quote'
 // The pre-2026-09-11 veto table, unchanged and passed no options: every row that was work is still
 // work, through the same layer, and the signals ride along on the receipt without deciding anything.
 // This IS the flag's contract — the four signal rows in it are work only because the flag is off.
+test('a lead-in is a task: the thing is still coming, so it earns no hook', async () => {
+  const never = async (): Promise<never> => { throw new Error('no call for a lead-in the examples read'); };
+  for (const text of ['btw', 'cool\n\nbtw', 'ok so', 'wait']) {
+    const reading = await isIdleTurn(text, facts({ burstSize: text.includes('\n') ? 2 : 1 }), never, { shareTurns: true });
+    assert.deepEqual([reading.shape, reading.layer], ['task', 'fast_path'], text);
+  }
+  // A lead-in the examples cannot read reaches the classifier, whose `preface` word is a task too.
+  const classified = await isIdleTurn('ey btw', facts(), async () => 'preface', { shareTurns: true });
+  assert.deepEqual([classified.shape, classified.layer], ['task', 'classify']);
+  // A stall that merely contains no lead-in at the end is still a stall.
+  assert.equal((await isIdleTurn('hmm', facts(), never, { shareTurns: true })).shape, 'idle');
+});
+
 test('a veto ends the turn as work, before the fast path and before any call', async () => {
   const rows: Array<[string, IdleFacts, string[]]> = [
     ['hey?', CLEAR, []],                                    // a question mark
