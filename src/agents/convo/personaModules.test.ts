@@ -332,9 +332,13 @@ import type { StoredMessage, UserProfile } from '../../db/types.js';
  * Then **+532**, sittings (194,002 → 194,534), Context.md alone: topics expire with their sitting;
  * a follow-up that refers back without naming its subject points into the current sitting first,
  * and when only an earlier sitting's topic fits she checks with one short guess before acting.
+ *
+ * Then **+308**, ask-before-guessing (194,475 → 194,783), Context.md alone: a message that reads two
+ * ways gets one short question with her guess inside before any answer, at any stakes; guessing
+ * stays for taste and predictions, never for what they said.
  */
-const CORPUS_CHARS = 194_475;
-const CORPUS_SHA256 = 'c60a3894ade6a79e5bca8bb279264b9d2af361ca826c83bd318bac5728ea5ab8';
+const CORPUS_CHARS = 194_783;
+const CORPUS_SHA256 = '9abe0e53581b23815a2e629d7c51193623fc5e8341dc26b675d5900df6369ab4';
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 
