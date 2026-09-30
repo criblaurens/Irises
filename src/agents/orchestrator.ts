@@ -7,6 +7,7 @@ import { markOpsDone, isOpsCancelled, noteOpsProgress, markOpsRetry, getOpsEtaSt
 import { detectCause, decide, splitMiss, retryTaskFor, steerReplayTaskFor, type TriageDecision } from './ops/triage.js';
 import { selectInterveningUserMessages } from './interveningMessages.js';
 import { redactInternalTools } from './guardrails.js';
+import { getEngineBackend } from './ops/engineBackend.js';
 import { voiceOutcome } from './fallfirm/client.js';
 import { type Outcome } from './fallfirm/floor.js';
 import { voiceInstant, type VoiceInstantOpts } from './fallfirm/voiceInstant.js';
@@ -188,12 +189,16 @@ async function composeFollowUp(
     // The run itself failed (timeout / rate limit / crash) — the ASK was fine. Tell them honestly
     // that YOU hit a snag and will get back to it, and DON'T ask them to restate the question (that
     // wrongly implies they were unclear). No fact content to relay.
-    instruction = `you hit a snag on your end pulling this up (a timeout / hiccup, not their fault) — tell them in one flat line that you couldn't finish it this moment and that a nudge in a bit gets it done. do NOT ask them to rephrase or re-pick; the ask was clear. what they wanted: "${task.request}"`;
+    // The retry ladder is already spent by the time this composes (triage ran it), so nothing here
+    // may promise another try. The engine's own name is the one piece of machinery she may name: it
+    // is their install, and "it acted up" is the true reason.
+    const engine = getEngineBackend()?.name ?? 'hermes';
+    instruction = `the look itself broke on your end this time (a timeout or a hiccup; the ask was fine and none of it is on them). own it in one flat line, the size of what you promised when you left. you may say it was their ${engine} acting up, named as theirs ("your ${engine}"), never ops, an engine, a system or a model, and never the technical detail. then leave them something of yours: your own take on what they asked, plainly as your guess and never as a finding, or where your head goes on it given what you know about them. a heavy ask gets a careful plain line and no joke. never tell them to nudge you, ping you, ask again or rephrase, and never promise another try. what they wanted: "${task.request}"`;
   } else {
     // Selection framing, not inventory framing: the composer gets THE QUESTION next to the result,
     // answers that, and holds the rest as one offer. "exactly as written" scopes fidelity to the
     // facts it relays — without the question here, a rich Ops pull reads as "relay all of this".
-    instruction = `here's what you came back with. what they asked: "${task.request}". answer THAT and lead with it — a couple of bubbles, not a report. anything in here that's true but beside their question, hold it and stop on the answer — no mention of what else you hold, and never a "want me to?" question. whatever you do relay — every number, date, name, ~ and maybe — stays exactly as written:\n\n${result.summary}`;
+    instruction = `here's what you came back with. what they asked: "${task.request}". answer THAT, told to them: the part that meets them leads, a couple of bubbles, not a report. anything in here that's true but beside their question, hold it — no mention of what else you hold, and never a "want me to?" question. after the answer, one line that hands the thread back if the moment earns one, or none. whatever you do relay — every number, date, name, ~ and maybe — stays exactly as written:\n\n${result.summary}`;
 
     // The read behind this look was shaky: Convo scored its comprehension of the ask below the
     // clean-delegation band when it launched. The answer is still real — but it answers Convo's
@@ -218,7 +223,12 @@ async function composeFollowUp(
   // 'Pine'..."), which shipped as one fused bubble. composerCore's stripEchoedHolding pass (fed the
   // same holdingText below) is the code backstop.
   if (task.holdingText) {
-    instruction += `\n\nthe last thing you said to them is below. it's ALREADY on their screen — never retype it or any part of it. your reply is the next text after it: fresh words that pick up where it left off, not a continuation of its sentence:\n"${task.holdingText}"`;
+    instruction += `\n\nthe last thing you said to them is below: the move you made when you left, and your reply is its payoff. it's ALREADY on their screen — never retype it or any part of it. your reply is the next text after it: fresh words that pick up where it left off, not a continuation of its sentence:\n"${task.holdingText}"`;
+  }
+  // Her own note from the delegating turn: what she read about them and what the answer should be
+  // told against. Context about the PERSON only; the result above stays the one fact source.
+  if (task.threadNote) {
+    instruction += `\n\nthe note you left yourself when you went to look (context about them and how you meant to come back, never a fact about the world): "${task.threadNote}"`;
   }
 
   // How long they actually waited on the holding line (single app clock: task.createdAt and now
@@ -283,7 +293,7 @@ async function composeFollowUp(
         ? { kind: 'nothing_found', summary: "couldn't track that one down after a couple looks", nextStep: 'stop there, one line, no offer', originalRequest: task.request }
         : { kind: 'nothing_found', summary: 'you need them to narrow down which one they mean', nextStep: 'ask a short steering question (which one exactly)', originalRequest: task.request };
     } else if (moment === 'transient') {
-      outcome = { kind: 'failed', summary: 'you hit a snag pulling this up on your end (not their fault)', nextStep: "tell them to nudge you in a bit and you'll grab it" };
+      outcome = { kind: 'failed', summary: 'you hit a snag pulling this up on your end (not their fault)', nextStep: 'own it in one flat line and leave them your own quick take on what they asked, said as a guess; never ask them to ping, nudge or ask again', originalRequest: task.request };
     } else {
       outcome = { kind: 'failed', summary: 'you have their answer but sending it glitched on your end', nextStep: "tell them to ping again and you'll fire it right over" };
     }

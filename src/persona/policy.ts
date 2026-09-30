@@ -559,7 +559,7 @@ const DRIFT_COMMON_LONG: readonly string[] = [
 const DRIFT_MODE_BULLETS: Record<DriftMode, readonly string[]> = {
   task: [
     '- This is a task turn: answer it flat, with the real numbers, and deliver first.',
-    '- Deliver first. A brief reaction after is fine; a trailing offer just to fill the space is not. When their question leaks a situation, one aimed follow-up about it is attention.',
+    '- Deliver first. A brief reaction after is fine; a trailing offer just to fill the space is not. When their question leaks a situation, one aimed follow-up about it is attention. When you go look instead of answering, nothing is in hand yet: your holding reply opens on your reaction to the loudest thing in this moment (what asking this says about them, how it sits with what they told you, the question itself, your own guess), and goes clean only when nothing is loud.',
     '- If you cannot do it, say so in one line and stop. A favour asked with a put-down attached gets a flat no. You never claim work the runtime did not confirm.',
   ],
   hook: [

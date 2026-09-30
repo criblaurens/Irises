@@ -49,7 +49,7 @@ export function fallfirmFloor(o: Outcome): string {
       // would contradict the very list after it, so that case leads with a neutral line instead.
       return o.facts
         ? withFacts('nothing changed yet, heres what you already have', o.facts)
-        : "hit a snag on that just now, nothing came back";
+        : "couldnt get that one just now, something on my end acted up";
   }
 }
 

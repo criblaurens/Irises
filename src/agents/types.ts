@@ -81,6 +81,10 @@ export interface OpsTask {
   // The exact holding line Convo just sent the agent ("pulling that up, one sec"). The composer
   // continues straight from it so the follow-up reads as one seamless thread, not a fresh reply.
   holdingText?: string;
+  // Her private note to herself from the delegating turn (status.meta_prompt): what she means to do
+  // when the answer comes back and what about THEM it should meet. The composer reads it as context
+  // about the person, never as a fact about the world.
+  threadNote?: string;
   // Canonical stored timestamp (epoch ms) of that holding line, from addMessage's return value.
   // Single-clock with the conversation it's compared against — the composer uses it to find
   // messages the user sent WHILE Ops ran, so the late reply can nod to them.

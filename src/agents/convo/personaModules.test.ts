@@ -333,8 +333,8 @@ import type { StoredMessage, UserProfile } from '../../db/types.js';
  * a follow-up that refers back without naming its subject points into the current sitting first,
  * and when only an earlier sitting's topic fits she checks with one short guess before acting.
  */
-const CORPUS_CHARS = 194_534;
-const CORPUS_SHA256 = '90b9dbd49f187197e0015b85b3c778dc7ea019b161702ea7dad5d04572484ff4';
+const CORPUS_CHARS = 194_475;
+const CORPUS_SHA256 = 'c60a3894ade6a79e5bca8bb279264b9d2af361ca826c83bd318bac5728ea5ab8';
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 

@@ -4861,6 +4861,11 @@ export async function processConvoResult(args: {
   const holdingRecord = holdingPart != null ? stripReplyTag(redactInternalTools(holdingPart)) : cleanForRecord;
   if (effects.delegatedTask && holdingRecord) {
     effects.delegatedTask.holdingText = holdingRecord;
+    // Her own note to her future self on this turn (status.meta_prompt) is, on a handoff, what she
+    // means to do when the answer comes back and what about them it should meet. The composer gets it
+    // as context about the person; the result stays its only fact source.
+    const note = coerceStatus(reply.statusRaw)?.meta_prompt?.trim();
+    if (note) effects.delegatedTask.threadNote = note;
     // And it joins her recent beats (state/holdingBeats.ts), which the next handoff's prompt and floor
     // steer off. Only the holding part, and only on a turn whose reply IS a holding line: a parked
     // turn's reply is the question, never a beat. Only its LAST bubble, too: a holding part of more
