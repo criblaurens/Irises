@@ -5,6 +5,7 @@
 //
 // "Her previous reply" is everything she sent since the person last spoke, held in memory. A
 // restart forgets it, which only means no unsend is on offer until she speaks again.
+import { getEngineBackend } from '../agents/ops/engineBackend.js';
 import { parseBridgeChatId } from '../channels/bridge/channel.js';
 import { lastUnsentAt, recordUnsent } from '../db/repositories/unsentMessages.js';
 import type { MoodCore } from '../persona/mood.js';
@@ -32,7 +33,9 @@ export interface ReachableBubble { id: string; text: string; at: number }
 export function unsendWindowMs(chatId: string): number | null {
   if (chatId.startsWith('web:')) return WEB_WINDOW_MS;
   const parsed = parseBridgeChatId(chatId);
-  return parsed ? PLATFORM_WINDOW_MS[parsed.platform] ?? null : null;
+  // An engine with no unsend seam (OpenClaw) would fail every call, so its chats have no window.
+  if (!parsed || !getEngineBackend()?.channelUnsend) return null;
+  return PLATFORM_WINDOW_MS[parsed.platform] ?? null;
 }
 
 const current = new Map<string, ReachableBubble[]>();  // sent since their last message

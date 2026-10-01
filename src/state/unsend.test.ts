@@ -13,13 +13,16 @@ import { convoToolList } from '../agents/convo/tools.js';
 import { buildSystemPromptSections, processConvoResult, type ChatContext } from '../agents/convo/shared.js';
 import { __resetOpsCoordination } from './opsCoordination.js';
 import { emptyMedia } from '../webhook/types.js';
+import { resetEngineBackendCache, type EngineBackend } from '../agents/ops/engineBackend.js';
 import type { LlmResult, LlmToolCall } from '../llm/types.js';
 
 const MIN = 60_000;
 const tg = () => `eng:telegram:${randomUUID()}`;
 const ok = async () => true;
 
-beforeEach(() => resetUnsendStateForTests());
+// An engine that can unsend; the window is null without one (an OpenClaw chat).
+const UNSEND_ENGINE = { channelUnsend: async () => true } as unknown as EngineBackend;
+beforeEach(() => { resetUnsendStateForTests(); resetEngineBackendCache(UNSEND_ENGINE); });
 
 /** She sent `texts` at `at`, then they spoke. */
 function previousReply(chatId: string, texts: string[], at: number): void {
@@ -32,6 +35,8 @@ test('windows: telegram 48h, photon 2min, web 2min, anything else none', () => {
   assert.equal(unsendWindowMs('eng:photon:any;-;+1555'), 2 * MIN);
   assert.equal(unsendWindowMs('web:debug'), 2 * MIN);
   assert.equal(unsendWindowMs('eng:whatsapp:1'), null);
+  resetEngineBackendCache(null);
+  assert.equal(unsendWindowMs('eng:telegram:1'), null, 'an engine with no unsend seam offers none');
 });
 
 test('offers her previous reply only after they spoke, and only inside the window less the margin', () => {
@@ -126,13 +131,13 @@ function args() {
 const unsendCall = (input: Record<string, unknown>): LlmToolCall => ({ name: 'unsend', input });
 
 test('dispatch: an annoyed-ground call rides out; the bubble number arrives as a string', async () => {
-  __resetOpsCoordination();
+  __resetOpsCoordination(); resetEngineBackendCache(null);
   const out = await processConvoResult({ ...args(), res: makeResult([unsendCall({ bubble: '2', why: 'they_are_annoyed' })]) });
   assert.deepEqual(out.unsend, { bubble: 2, why: 'they_are_annoyed' });
 });
 
 test('dispatch: the irritated ground with no mood this turn is refused; an unknown ground is dropped', async () => {
-  __resetOpsCoordination();
+  __resetOpsCoordination(); resetEngineBackendCache(null);
   const irritated = await processConvoResult({ ...args(), res: makeResult([unsendCall({ bubble: 1, why: 'i_am_irritated' })]) });
   assert.equal(irritated.unsend, null);
   const unknown = await processConvoResult({ ...args(), res: makeResult([unsendCall({ bubble: 1, why: 'bored' })]) });
