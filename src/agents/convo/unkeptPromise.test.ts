@@ -96,6 +96,17 @@ test('phrases match as whole phrases inside one clause, never across a break', (
   assert.equal(detectUnkeptPromise(['depends on itself really'], null, 0).promised, false);
 });
 
+// Observed on the 2026-10-01 bench: "your counselor rough on it?" fired the guard, and the re-ask
+// rewrote the reply and dropped the unsend the first pass had made.
+test('"on it" as the object of a verb or an adjective, or inside a question, is not a promise', () => {
+  for (const line of ['your counselor rough on it?', 'id sleep on it tbh', 'u still on it?']) {
+    assert.equal(detectUnkeptPromise([line], null, 0).promised, false, line);
+  }
+  for (const line of ['on it', 'ok on it', "i'm on it", 'hermes is on it']) {
+    assert.equal(detectUnkeptPromise([line], null, 0).phrase, 'on it', line);
+  }
+});
+
 test('matching is blind to case and punctuation', () => {
   assert.equal(detectUnkeptPromise(['ON IT!'], null, 0).phrase, 'on it');
   assert.equal(detectUnkeptPromise(['[[re:1]]ON IT, checking on that'], null, 0).phrase, 'on it');

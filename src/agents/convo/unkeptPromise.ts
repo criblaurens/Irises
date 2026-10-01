@@ -86,26 +86,33 @@ export interface UnkeptPromiseVerdict {
   unkept: boolean;
 }
 
-// A phrase has to land inside ONE clause. Sentence and clause punctuation ends the run of words a
-// phrase may span, so "moving on. it can wait" and "hang on, it broke" are not promises even though
-// their letters contain one — the words sit either side of a break. Every other non-alphanumeric run
-// collapses to a single space, which is what makes the match blind to case, punctuation and the
-// `[[re:N]]` routing prefix ("ON IT!", "[[re:1]]ON IT"). The leading/trailing pad is what
-// makes the includes() below a whole-phrase test rather than a substring one ("depends on itself"
-// contains "on it" as letters, never as words).
-const CLAUSE_BREAK = /[.!?,;:\n\r]+/;
+// A phrase has to land inside ONE clause that STATES something. Sentence and clause punctuation ends
+// the run of words a phrase may span, so "moving on. it can wait" and "hang on, it broke" are not
+// promises even though their letters contain one — the words sit either side of a break. Every other
+// non-alphanumeric run collapses to a single space, which is what makes the match blind to case,
+// punctuation and the `[[re:N]]` routing prefix ("ON IT!", "[[re:1]]ON IT"). The leading/trailing pad
+// is what makes the match below a whole-phrase test rather than a substring one ("depends on itself"
+// contains "on it" as letters, never as words). A clause that ends in a question mark asks about work
+// rather than claiming any, the same reading the claim half gives it (statedClauses below).
 const NON_WORD = /[^a-z0-9]+/g;
 
-function clauses(text: string): string[] {
-  return text.toLowerCase().split(CLAUSE_BREAK).map(c => ` ${c.replace(NON_WORD, ' ').trim()} `);
-}
+// `on it` is the one row whose words are as often the object of a verb or an adjective ("sleep on
+// it", "rough on it"). It is a status line only when it opens its clause or follows a word that makes
+// it one: an acknowledgment, still/already, or who is on it ("i'm", "hermes is").
+const ON_IT_AFTER = new Set([
+  'ok', 'okay', 'k', 'yeah', 'yep', 'yup', 'ya', 'aight', 'alright', 'still', 'already', 'right', 'get', 'getting',
+  'im', 'm', 'am', 're', 'we', 'is', 's', 'hermes',
+]);
 
 /** The first phrase the reply promises with, scanning bubble by bubble in reading order. */
 function findPromise(bubbles: string[]): PromisePhrase | undefined {
   for (const bubble of bubbles) {
-    for (const clause of clauses(bubble)) {
+    for (const clause of statedClauses(bubble)) {
       for (const phrase of PROMISE_PHRASES) {
-        if (clause.includes(` ${phrase} `)) return phrase;
+        const at = clause.indexOf(` ${phrase} `);
+        if (at < 0) continue;
+        if (phrase === 'on it' && at > 0 && !ON_IT_AFTER.has(clause.slice(0, at).trim().split(' ').pop()!)) continue;
+        return phrase;
       }
     }
   }
@@ -195,8 +202,8 @@ const NOT_A_REPORT_PHRASES = [' going to ', ' want me to '];
 const REPLY_TAG = /^\s*\[\[re:\d+\]\]/;
 const REPLY_TAGS = /\[\[re:\d+\]\]/g;
 
-/** A bubble's clauses, normalized like `clauses()`, each with whether its own terminator carries a
- *  question mark. */
+/** A bubble's clauses, lowercased and padded for whole-phrase matching, each with whether its own
+ *  terminator carries a question mark. */
 function terminatedClauses(text: string): Array<{ clause: string; asks: boolean }> {
   const pieces = text.replace(REPLY_TAGS, ' ').toLowerCase().split(/([.!?,;:\n\r]+)/);
   const out: Array<{ clause: string; asks: boolean }> = [];
