@@ -5,7 +5,7 @@ title: Irises
 abstract: "The personality layer for your AI agent. Irises texts like a person and hands the heavy work to hermes."
 authors:
   - given-names: Rivian
-    alias: rivianpratama
-repository-code: "https://github.com/rivianpratama/Irises"
-url: "https://github.com/rivianpratama/Irises"
+    alias: criblaurens
+repository-code: "https://github.com/criblaurens/Irises"
+url: "https://github.com/criblaurens/Irises"
 license: MIT

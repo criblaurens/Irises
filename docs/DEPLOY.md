@@ -16,7 +16,7 @@
 
 ### 2a. Fastest path (no infra at all)
 ```bash
-git clone https://github.com/rivianpratama/Irises.git
+git clone https://github.com/criblaurens/Irises.git
 cd Irises
 npm install
 cp .env.example .env

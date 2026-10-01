@@ -51,7 +51,7 @@ so Linux and macOS are the platforms with mileage on them.
 ## 2. Hand them the install (they run this, you do not)
 
 ```bash
-git clone https://github.com/rivianpratama/irises ~/irises && cd ~/irises
+git clone https://github.com/criblaurens/irises ~/irises && cd ~/irises
 bash ./scripts/irises.sh
 ```
 

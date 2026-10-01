@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="https://github.com/rivianpratama/Irises">
+<a href="https://github.com/criblaurens/Irises">
   <img src="docs/assets/irises-logo.png" alt="Irises" width="340">
 </a>
 
@@ -227,7 +227,7 @@ You do not need a database and you do not need an API key of your own. Irises re
 1. Open a terminal on the machine that runs hermes. On Windows, open Git Bash or WSL2.
 2. Clone the repository and open the folder.
    ```bash
-   git clone https://github.com/rivianpratama/irises && cd irises
+   git clone https://github.com/criblaurens/irises && cd irises
    ```
 3. Start the menu.
    ```bash
@@ -264,7 +264,7 @@ The other useful flags are `--no-bridge`, `--no-service`, `--port N`, `--front P
 **Would you prefer a guide?** Your agent can walk you through the install. The setup skill explains what Irises is, runs the read-only checks, gives you the commands and verifies the result. It never installs anything by itself.
 
 ```bash
-hermes skills install https://raw.githubusercontent.com/rivianpratama/irises/main/skills/irises-setup-hermes/SKILL.md
+hermes skills install https://raw.githubusercontent.com/criblaurens/irises/main/skills/irises-setup-hermes/SKILL.md
 # then, in any hermes chat:  /irises-setup-hermes
 ```
 
@@ -468,7 +468,7 @@ The license asks one thing in return: credit. Keep the copyright line and the li
 
 If your product shows credits, an About screen or an open-source notices page, the line to use is:
 
-> Based on [Irises](https://github.com/rivianpratama/Irises) by Rivian.
+> Based on [Irises](https://github.com/criblaurens/Irises) by Rivian.
 
 To cite Irises in writing, use the **Cite this repository** button on GitHub (it reads [CITATION.cff](CITATION.cff)).
 

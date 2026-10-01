@@ -9,7 +9,7 @@ Then you are the person I built this for. Irises sits **in front of the engine y
 Install it in a terminal on the machine the engine runs on (on Windows, that terminal is **Git Bash** — it ships with the Git for Windows you already need for the clone — or a **WSL2** shell):
 
 ```bash
-git clone https://github.com/rivianpratama/irises && cd irises
+git clone https://github.com/criblaurens/irises && cd irises
 bash ./scripts/irises.sh          # the menu: install or repair, configure, update, uninstall, status, advanced
 ```
 
@@ -27,11 +27,11 @@ Piping answers into the menu works too, but it is the flag scripts that are stab
 
 ```bash
 # hermes:
-hermes skills install https://raw.githubusercontent.com/rivianpratama/irises/main/skills/irises-setup-hermes/SKILL.md
+hermes skills install https://raw.githubusercontent.com/criblaurens/irises/main/skills/irises-setup-hermes/SKILL.md
 #   then, in any hermes chat:  /irises-setup-hermes
 
 # OpenClaw:
-openclaw skills install git:rivianpratama/irises
+openclaw skills install git:criblaurens/irises
 #   then ask OpenClaw to run the  irises-setup-openclaw  skill
 ```
 
@@ -52,7 +52,7 @@ Full guide, diagrams, and security notes: **[docs/ENGINES.md](ENGINES.md)**.
 Irises is meant to sit on top of the engine you already run, so the install is one command in a terminal on that machine:
 
 ```bash
-git clone https://github.com/rivianpratama/irises && cd irises
+git clone https://github.com/criblaurens/irises && cd irises
 bash ./scripts/irises.sh          # or: npm run setup — same menu
 ```
 

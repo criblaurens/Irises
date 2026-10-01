@@ -53,7 +53,7 @@ OpenClaw is untouched: it still speaks the gateway `agent` RPC.
 **The install is a terminal command**, run on the machine the engine runs on:
 
 ```bash
-git clone https://github.com/rivianpratama/irises && cd irises
+git clone https://github.com/criblaurens/irises && cd irises
 bash ./scripts/irises.sh                           # the menu; `npm run setup` is the same thing
 ```
 
@@ -95,7 +95,7 @@ restarts nothing. Install the guide for your engine:
 
 ```bash
 # hermes
-hermes skills install https://raw.githubusercontent.com/rivianpratama/irises/main/skills/irises-setup-hermes/SKILL.md
+hermes skills install https://raw.githubusercontent.com/criblaurens/irises/main/skills/irises-setup-hermes/SKILL.md
 # then, in any hermes chat:   /irises-setup-hermes
 ```
 
@@ -104,7 +104,7 @@ otherwise reachable to you anonymously — for it to resolve.)
 
 ```bash
 # OpenClaw
-openclaw skills install git:rivianpratama/irises
+openclaw skills install git:criblaurens/irises
 # then ask your OpenClaw to run the irises-setup-openclaw skill
 ```
 

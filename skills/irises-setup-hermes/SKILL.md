@@ -63,7 +63,7 @@ Give them these two commands, exactly as written, and tell them to run them in a
 machine (Git Bash or WSL2 if that machine is Windows):
 
 ```bash
-git clone https://github.com/rivianpratama/irises ~/irises && cd ~/irises
+git clone https://github.com/criblaurens/irises ~/irises && cd ~/irises
 bash ./scripts/irises.sh
 ```
 
