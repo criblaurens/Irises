@@ -28,7 +28,7 @@ import { PROMPT_BUDGET, MIN_TRANSCRIPT_SHARE, type BudgetKey } from './promptPol
 import { renderDriftAnchor, DRIFT_LONG_WINDOW_CHARS, type DriftMode } from '../../persona/policy.js';
 import { buildTurnTraceDraft, type MeasuredPrompt, type TranscriptMessage } from '../../diagnostics/turnTrace.js';
 import {
-  REACTION_TOOL, REMEMBER_USER_TOOL, delegateToOpsTool, SET_PREFERENCE_TOOL, SCHEDULE_AUTOMATION_TOOL,
+  REACTION_TOOL, REMEMBER_USER_TOOL, delegateToOpsTool, SET_PREFERENCE_TOOL, SCHEDULE_AUTOMATION_TOOL, UNSEND_TOOL,
   LIST_AUTOMATIONS_TOOL, CANCEL_AUTOMATION_TOOL, UPDATE_AUTOMATION_TOOL, CANCEL_RESEARCH_TOOL,
   STEER_RESEARCH_TOOL, UPDATE_DIRECTIVES_TOOL,
   UPDATE_MEMORY_TOOL, RECALL_MEMORY_TOOL, RENAME_CHAT_TOOL, REMOVE_MEMBER_TOOL,
@@ -148,6 +148,9 @@ const TOOLS_1TO1: LlmToolDef[] = [
   RECALL_MEMORY_TOOL,
 ];
 const TOOLS_GROUP: LlmToolDef[] = [...TOOLS_1TO1, RENAME_CHAT_TOOL, REMOVE_MEMBER_TOOL];
+// The media fixture also carries the unsend tool and its section at the widest list the code can
+// build: six bubbles (state/unsend.ts REACH_CAP), each past the 160-character clip.
+const WIDEST_UNSEND: string[] = Array.from({ length: 6 }, (_, i) => `${i + 1} `.padEnd(400, 'w'));
 
 // ── memory stacks, rendered by the real renderer ─────────────────────────────
 // The memory stack is the wrapped tier block (preamble → short → medium → discovery → flexible) that
@@ -806,7 +809,7 @@ const FIXTURES: Fixture[] = [
       },
       contextBlock: contextBlockWith(MEDIA_STACK),
       activeOps: ACTIVE_OPS,
-      tools: TOOLS_1TO1,
+      tools: [...TOOLS_1TO1, UNSEND_TOOL],
       history: HISTORY_6,
       incomingText: `the lease pdf, can you read it ${MEDIA_NOTE}`,
       computed: COMPUTED,
@@ -816,13 +819,13 @@ const FIXTURES: Fixture[] = [
         hits: [{ label: 'the lease pdf they just sent', source: 'research' }],
       },
       craft: craftFacts(MEDIA_DATA, `the lease pdf, can you read it ${MEDIA_NOTE}`),
-      liveState: { reminders: WIDE_REMINDERS, holdingBeats: FULL_BEATS },
+      liveState: { reminders: WIDE_REMINDERS, holdingBeats: FULL_BEATS, unsendBubbles: WIDEST_UNSEND },
     },
     memoryStack: MEDIA_STACK,
     sections: [
       'persona', 'tool_docs', 'capability', 'model_map', 'craft_modules', 'update_status',
       'context_block', 'active_ops', 'recent_beats', 'live_reminders', 'current_time', 'weather', 'status_contract',
-      'conversation_timing', 'reply_order', 'turn_focus', 'behavior_anchor', 'json_anchor',
+      'conversation_timing', 'reply_order', 'unsend', 'turn_focus', 'behavior_anchor', 'json_anchor',
     ],
   },
   {

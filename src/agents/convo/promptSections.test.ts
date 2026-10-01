@@ -575,8 +575,11 @@ test('every reported section is a known id, named once, in assembly order', () =
  *    • recent_beats — pushed only when the caller hands in a LiveState carrying holding beats. Its
  *      text is her own sent bubbles rather than repo prose; its PUSH SITE, its tail placement right
  *      behind `active_ops` and its delegate_to_ops gate are pinned by the test just below, and its
- *      SIZE at a full history by convo/promptBudget.test.ts's media fixture. */
-const GOLDEN_EXEMPT: ReadonlySet<string> = new Set(['turn_focus', 'hooks', 'thesis', 'self', 'owed', 'live_reminders', 'recent_beats']);
+ *      SIZE at a full history by convo/promptBudget.test.ts's media fixture.
+ *    • unsend — pushed only on a turn the unsend tool is offered, and its list is her own sent
+ *      bubbles. Its PUSH SITE and its tool gate are pinned in state/unsend.test.ts, its SIZE at the
+ *      widest list by convo/promptBudget.test.ts's media fixture. */
+const GOLDEN_EXEMPT: ReadonlySet<string> = new Set(['turn_focus', 'hooks', 'thesis', 'self', 'owed', 'live_reminders', 'recent_beats', 'unsend']);
 
 test('the fixtures between them exercise every dyn section — no push site left unnamed', () => {
   const seen = new Set(FIXTURES.flatMap(f => buildSystemPromptSections(...f.args).sections.map(s => s.name)));

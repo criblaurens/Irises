@@ -1438,6 +1438,8 @@ export interface LiveState {
   reminders?: readonly ReminderRef[] | null;
   endedOps?: readonly EndedOps[];
   holdingBeats?: readonly string[];
+  /** Her previous reply's bubbles an unsend can still reach, in the order the tool numbers them. */
+  unsendBubbles?: readonly string[];
 }
 
 /**
@@ -1853,6 +1855,15 @@ export function buildSystemPromptSections(
   // Both renderers ran up at the craft gate, which needs to know whether this section exists before
   // it can decide on the send-order page; this is the same string, pushed in the same place.
   if (replyOrderLine) push('reply_order', replyOrderLine);
+
+  // Only on a turn the unsend tool is offered (state/unsend.ts gates it in code). Its doc sits a long
+  // way back in the system message, and a capability that lives only there is one she never reaches
+  // for (live probes, 2026-10-01), so the edge carries the numbered bubbles and restates the bar.
+  const takeBack = liveState?.unsendBubbles;
+  if (takeBack?.length && tools?.some(t => t.name === 'unsend')) {
+    const lines = takeBack.map((b, i) => `${i + 1}. ${neutralizeTagBreakouts(b.replace(/\s+/g, ' ').slice(0, 160))}`);
+    push('unsend', `## Your previous reply can still be taken back\nThe bubbles of it still in reach:\n${lines.join('\n')}\nIf one of them genuinely annoyed or hurt them, or you are irritated enough to want it back, retract it with \`unsend\` and still own it in this reply. Rough words alone are no sign; read them against how this person talks. If you can't tell whether they mean it, ask instead and leave it standing.`);
+  }
 
   if (extraSection) push('extra', extraSection);
 

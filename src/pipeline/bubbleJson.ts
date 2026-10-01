@@ -445,6 +445,13 @@ function validateEnvelope(v: unknown, allowBareArray: boolean): Envelope | null 
  * Returns the {bubbles, confidenceLevel?} envelope (bubbles may be `[]` for a tool-only turn), or
  * null when nothing validates.
  */
+// A weak-model slip: a tool-call item echoes the flat args union AFTER its `args` object, and that
+// union carries a `name` arg of its own (remember_user, rename_group_chat). Spilled as null, it is a
+// duplicate key, and JSON.parse keeps the last one, so the call loses its tool name and is dropped
+// (live, 2026-10-01: an unsend she meant). Renaming the spilled key keeps the name she wrote first.
+// Flat args never nest, so `[^{}]` keeps the match inside one item.
+const SPILLED_NAME = /("name"\s*:\s*"[^"]*"\s*,\s*"args"\s*:\s*\{[^{}]*\})([^{}]*?)"name"\s*:\s*null/g;
+
 function parseEnvelope(raw: string | null | undefined): Envelope | null {
   if (!raw || !raw.trim()) return null;
 
@@ -453,7 +460,8 @@ function parseEnvelope(raw: string | null | undefined): Envelope | null {
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/i, '')
-    .trim();
+    .trim()
+    .replace(SPILLED_NAME, '$1$2"spilled_name":null');
 
   // tier 1 — direct parse of the WHOLE string. The only tier that accepts a bare top-level array,
   // since here the array IS the entire reply (not something scraped out of surrounding prose).

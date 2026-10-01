@@ -10,7 +10,7 @@ import {
   noteSentBubble, resetUnsendStateForTests, unsendOffer, unsendWindowMs,
 } from './unsend.js';
 import { convoToolList } from '../agents/convo/tools.js';
-import { processConvoResult, type ChatContext } from '../agents/convo/shared.js';
+import { buildSystemPromptSections, processConvoResult, type ChatContext } from '../agents/convo/shared.js';
 import { __resetOpsCoordination } from './opsCoordination.js';
 import { emptyMedia } from '../webhook/types.js';
 import type { LlmResult, LlmToolCall } from '../llm/types.js';
@@ -95,13 +95,22 @@ test('the irritated ground needs mad at 25 or below', () => {
   assert.equal(moodAllowsIrritatedUnsend(undefined), false);
 });
 
-test('the tool exists only with bubbles in reach, last in the list, numbering them', () => {
+test('the tool exists only when offered, last in the list, with a static doc', () => {
   const base = { engineName: 'hermes' as const, isGroupChat: false };
   assert.equal(convoToolList(base).some(t => t.name === 'unsend'), false);
-  const tools = convoToolList({ ...base, unsendBubbles: [{ text: 'first' }, { text: 'second' }] });
-  const last = tools[tools.length - 1];
-  assert.equal(last.name, 'unsend');
-  assert.match(last.description, /1\. "first"\n2\. "second"/);
+  const tools = convoToolList({ ...base, unsend: true });
+  assert.equal(tools[tools.length - 1].name, 'unsend');
+  assert.deepEqual(tools.slice(0, -1).map(t => t.name), convoToolList(base).map(t => t.name), 'every other tool keeps its place');
+});
+
+test('the take-back section numbers the bubbles, only when the tool is offered', () => {
+  const tools = convoToolList({ engineName: 'hermes', isGroupChat: false, unsend: true });
+  const live = { unsendBubbles: ['zq-bubble-one', 'zq-bubble-two'] };
+  const on = buildSystemPromptSections(undefined, '', [], undefined, tools, [], 'x', undefined, undefined, undefined, null, undefined, undefined, undefined, undefined, undefined, undefined, live);
+  assert.match(on.tail, /## Your previous reply can still be taken back\nThe bubbles of it still in reach:\n1\. zq-bubble-one\n2\. zq-bubble-two/);
+  const off = buildSystemPromptSections(undefined, '', [], undefined, convoToolList({ engineName: 'hermes', isGroupChat: false }), [], 'x', undefined, undefined, undefined, null, undefined, undefined, undefined, undefined, undefined, undefined, live);
+  assert.doesNotMatch(off.tail, /taken back/);
+  assert.doesNotMatch(on.system, /zq-bubble/, 'the bubbles never enter the cached system message');
 });
 
 // ── dispatch: the call as she made it → ChatResponse.unsend ──────────────────

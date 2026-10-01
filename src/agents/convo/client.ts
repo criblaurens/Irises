@@ -463,10 +463,11 @@ export async function chat(
 
   // The list itself — order included — lives in tools.ts (convoToolList); the flags are read HERE so
   // that function stays pure and testable.
+  const unsendBubbles = unsendOffer(chatId).map(b => b.text);
   const tools: LlmToolDef[] = convoToolList({
     engineName,
     isGroupChat: chatContext?.isGroupChat ?? false,
-    unsendBubbles: unsendOffer(chatId),
+    unsend: unsendBubbles.length > 0,
   });
 
   // Label the current turn with when it actually ARRIVED, not lock-acquisition time — a message that
@@ -826,7 +827,7 @@ export async function chat(
   // What stands live beyond the running lookups (convo/shared.ts LiveState): their reminders, read
   // above within its budget, the lookups that ended in the last few minutes, and her own recent
   // holding beats from the batch above.
-  const liveState = { reminders: await liveRemindersRead, endedOps: getRecentlyEndedOps(chatId), holdingBeats };
+  const liveState = { reminders: await liveRemindersRead, endedOps: getRecentlyEndedOps(chatId), holdingBeats, unsendBubbles };
   const prompt = buildSystemPromptSections(chatContext, contextBlock, activeOps, updateNote ?? undefined, tools, history, textToSend, userTz, affectState, computed, capabilitySummary, climate, thread, introWeave, turnFocus, craftFacts, personaTurn, liveState);
   const system = prompt.system;
 
