@@ -94,6 +94,7 @@ import type { FamiliarityBand } from '../../persona/familiarity.js';
 import { updateFamiliarity } from '../../memory/familiarityPass.js';
 import { saveHookState } from '../../db/repositories/hookState.js';
 import { getAffectState, saveAffectState } from '../../db/repositories/affectState.js';
+import { UNSEND_WHYS, moodAllowsIrritatedUnsend, type UnsendRequest } from '../../state/unsend.js';
 import type { RelationshipClimate } from '../../persona/climate.js';
 import { wrapPrompt, dataTag, neutralizeTagBreakouts } from '../../llm/promptTag.js';
 import { getRecentErrors, type StoredErrorRow } from '../../diagnostics/errorLog.js';
@@ -205,6 +206,9 @@ export interface ChatResponse {
   groupChatIcon: { prompt: string } | null;
   removeMember: string | null;
   delegatedTask: OpsTask | null;
+  /** One of her previous reply's bubbles to take back (state/unsend.ts), already checked against
+   *  her mood when the ground is her own irritation. The send boundary carries it out. */
+  unsend?: UnsendRequest | null;
   /** The bubble-count guard fired on the parse that produced `text` (bubbleJson's collectBubbles):
    *  the model wrote more than BUBBLE_HARD_CAP bubbles and the middle was dropped. Rides the reply
    *  so the send boundary (src/index.ts → buildBubbleReport) can report the cap against the reply it
@@ -3143,6 +3147,8 @@ export interface TurnEffects {
   renameChat: string | null;
   rememberedUser: ChatResponse['rememberedUser'];
   removeMember: string | null;
+  /** The turn's one unsend call, as she made it (the mood check runs at the return). */
+  unsend: UnsendRequest | null;
   /** A note landed this turn (the groomer's trigger), and the row it landed on. */
   noteSaved: boolean;
   savedNote: MediumEntry | null;
@@ -3159,7 +3165,7 @@ export function newTurnEffects(): TurnEffects {
   return {
     results: [], delegatedTask: null, modelDelegated: false, suppressedDuplicate: false,
     parkedApproval: null, cancelled: [], reminders: null, reaction: null, renameChat: null, rememberedUser: null,
-    removeMember: null, noteSaved: false, savedNote: null, directiveActed: false,
+    removeMember: null, unsend: null, noteSaved: false, savedNote: null, directiveActed: false,
     replyLanguageWrittenByTool: false, dispatched: [],
   };
 }
@@ -3315,6 +3321,18 @@ async function dispatchToolCalls(calls: LlmToolCall[], effects: TurnEffects, ctx
             tool: 'send_reaction', arg: 'type', value: String(input.type ?? '').slice(0, 40),
             reason: input.type === 'custom' ? 'custom_without_emoji' : 'not_a_tapback_type',
           },
+        });
+      }
+    } else if (call.name === 'unsend') {
+      // One per reply: a second call is dropped. Both args are closed sets, so anything else is a
+      // dropped arg, recorded as one, and the bubble stays.
+      const bubble = coerceReactionIndex(input.bubble);
+      const why = UNSEND_WHYS.find(w => w === input.why);
+      if (!effects.unsend && bubble != null && why) effects.unsend = { bubble, why };
+      else if (!effects.unsend) {
+        record({
+          type: 'event', label: 'convo:tool_arg_ignored', chatId, handle,
+          detail: { tool: 'unsend', arg: bubble == null ? 'bubble' : 'why', value: String((bubble == null ? input.bubble : input.why) ?? '').slice(0, 40), reason: 'not_offered_value' },
         });
       }
     } else if (call.name === 'rename_group_chat') {
@@ -5110,7 +5128,7 @@ export async function processConvoResult(args: {
   // Deliberately NOT shared with the silent-turn floor above, which tests the same six terms at an
   // earlier moment — before it voices — and would read `false` here afterwards. Same words, a
   // different question ("did the model produce nothing" vs "did this turn end with nothing").
-  const producedNothingVisible = !textResponse && !onScreen.length && !effects.reaction && !effects.renameChat && !effects.rememberedUser && !effects.removeMember && !effects.delegatedTask;
+  const producedNothingVisible = !textResponse && !onScreen.length && !effects.reaction && !effects.renameChat && !effects.rememberedUser && !effects.removeMember && !effects.delegatedTask && !effects.unsend;
 
   // Tripwire: that state is the silent-turn failure mode. The floor above now RECOVERS the
   // no-tool-call variant, so what still reaches here is the tool-bearing one (a tool-only envelope
@@ -5214,9 +5232,16 @@ export async function processConvoResult(args: {
       })
     : undefined;
 
+  // Her irritation is the one ground code can check: it has to be in this turn's mood, not only in
+  // her say-so. Refused, the bubble stays and nothing is said about it.
+  const unsend = effects.unsend && (effects.unsend.why !== 'i_am_irritated' || moodAllowsIrritatedUnsend(affect?.status)) ? effects.unsend : null;
+  if (effects.unsend && !unsend) {
+    record({ type: 'event', label: 'convo:unsend_refused', chatId, handle, detail: { why: effects.unsend.why, mood: affect?.status ? `${affect.status.mood_core} ${affect.status.mood_level}` : 'none' } });
+  }
+
   return {
     text: textResponse, reaction: effects.reaction, renameChat: effects.renameChat,
-    rememberedUser: effects.rememberedUser, removeMember: effects.removeMember,
+    rememberedUser: effects.rememberedUser, removeMember: effects.removeMember, unsend,
     delegatedTask: effects.delegatedTask, generatedImage: null, groupChatIcon: null, hardCapped, turnTrace,
     ...(onScreen.length ? { emittedPrefix: [...onScreen] } : {}),
   };

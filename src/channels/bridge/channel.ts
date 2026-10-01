@@ -101,4 +101,13 @@ export const bridgeChannel: Channel = {
   },
 
   async sendReaction() { /* caps.reactions=false — never called; explicit no-op for safety */ },
+
+  // Through the engine's own adapter (delete_message). False when the engine can't, or the platform
+  // refused: the bubble is still there, and the caller says so.
+  async unsendMessage(chatId, messageId) {
+    const parsed = parseBridgeChatId(chatId);
+    const engine = getEngineBackend();
+    if (!parsed || !engine?.channelUnsend) return false;
+    return engine.channelUnsend(parsed.platform, parsed.target, messageId);
+  },
 };

@@ -280,6 +280,9 @@ export interface EngineBackend {
    *  agent run). No-ops safely when the adapter/gateway lacks the capability. Optional: a backend
    *  without it means "no bridge typing" — bridgeChannel.startTyping short-circuits on `!channelTyping`. */
   channelTyping?(platform: string, chatId: string, state: 'start' | 'stop', opts?: { threadId?: string }): Promise<void>;
+  /** Bridge unsend: take back one of Irises's own messages through the engine's channel adapter.
+   *  True only when the platform confirmed it. MUST never throw. Optional: absent means no unsend. */
+  channelUnsend?(platform: string, chatId: string, messageId: string): Promise<boolean>;
 }
 
 // ── dispatch ──────────────────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ import { webChatInfo } from './identity.js';
 export interface WebEvent {
   seq: number;
   ts: number;
-  type: 'bubble' | 'typing' | 'reaction' | 'read' | 'hello';
+  type: 'bubble' | 'typing' | 'reaction' | 'unsend' | 'read' | 'hello';
   // bubble
   id?: string;
   text?: string;
@@ -129,5 +129,9 @@ export const webChannel: Channel = {
   async getChat(chatId) { return webChatInfo(chatId); },
   async sendReaction(chatId, messageId, reaction) {
     push(chatId, { type: 'reaction', messageId, reaction });
+  },
+  async unsendMessage(chatId, messageId) {
+    push(chatId, { type: 'unsend', messageId });
+    return true;
   },
 };

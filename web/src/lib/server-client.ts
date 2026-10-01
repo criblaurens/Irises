@@ -15,7 +15,7 @@
 export interface WebEvent {
   seq: number;
   ts: number;
-  type: "bubble" | "typing" | "reaction" | "read" | "hello";
+  type: "bubble" | "typing" | "reaction" | "unsend" | "read" | "hello";
   id?: string; // bubble: stable id (React key + reaction target)
   text?: string; // bubble text
   replyTo?: { message_id: string };

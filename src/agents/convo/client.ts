@@ -16,6 +16,7 @@ import { pendingIntroWeave } from '../ops/firstMove.js';
 import { timestampLabel } from '../../pipeline/chatTime.js';
 import { DEFAULT_TZ } from '../../pipeline/zonedTime.js';
 import { getAffectState } from '../../db/repositories/affectState.js';
+import { unsendOffer } from '../../state/unsend.js';
 import {
   getRelationshipClimate, relationshipClimateEnabled,
 } from '../../db/repositories/relationshipClimate.js';
@@ -465,6 +466,7 @@ export async function chat(
   const tools: LlmToolDef[] = convoToolList({
     engineName,
     isGroupChat: chatContext?.isGroupChat ?? false,
+    unsendBubbles: unsendOffer(chatId),
   });
 
   // Label the current turn with when it actually ARRIVED, not lock-acquisition time — a message that

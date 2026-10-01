@@ -1,0 +1,68 @@
+--- a/plugins/platforms/photon/adapter.py
++++ b/plugins/platforms/photon/adapter.py
+@@ -2297,6 +2297,18 @@
+             logger.debug("[photon] remove_reaction failed: %s", e)
+             return False
+ 
++    async def delete_message(self, chat_id: str, message_id: str) -> bool:
++        """Unsend one of our own messages (iMessage allows it for about two
++        minutes). Soft-fails (False), never raises."""
++        try:
++            data = await self._sidecar_call(
++                "/unsend", {"spaceId": chat_id, "messageId": message_id},
++            )
++            return bool(data.get("unsent"))
++        except Exception as e:
++            logger.debug("[photon] delete_message failed: %s", e)
++            return False
++
+     # -- Agent-facing reactions (send_message action="react") ---------------
+     #
+     # Unlike the lifecycle hooks below, these are deliberate agent intents,
+--- a/plugins/platforms/photon/sidecar/index.mjs
++++ b/plugins/platforms/photon/sidecar/index.mjs
+@@ -357,6 +357,11 @@
+ // is the outbound reaction Message returned by `target.react()`, kept so
+ // /unreact can `unsend()` it later.
+ const reactionHandles = new Map();
++// Outbound messages by `${spaceId}\0${messageId}`, so /unsend can take one back
++// without a `space.getMessage` round trip. iMessage only allows an unsend for
++// about two minutes, so a small cap covers every message still eligible.
++const MAX_SENT_HANDLES = 256;
++const sentHandles = new Map();
+ 
+ function lruSet(map, key, value, cap) {
+   if (map.has(key)) map.delete(key);
+@@ -1033,7 +1038,32 @@
+           ? spectrumMarkdown(text)
+           : spectrumText(text);
+       const result = await space.send(builder);
++      if (result?.id) {
++        lruSet(sentHandles, `${spaceId}\u0000${result.id}`, result, MAX_SENT_HANDLES);
++      }
+       return ok(res, { messageId: result?.id || null });
++    }
++    if (req.url === "/unsend") {
++      // Take back one of our own messages. Every failure (too late, not ours,
++      // not found) is `unsent: false`, so the caller knows it is still there.
++      const { spaceId, messageId } = body || {};
++      if (!spaceId || !messageId) {
++        return badRequest(res, "spaceId and messageId are required");
++      }
++      const key = `${spaceId}\u0000${messageId}`;
++      try {
++        const space = await resolveSpace(spaceId);
++        const msg = sentHandles.get(key) || (await space.getMessage(messageId));
++        if (!msg) return ok(res, { unsent: false });
++        await space.unsend(msg);
++        sentHandles.delete(key);
++        return ok(res, { unsent: true });
++      } catch (e) {
++        console.error(
++          "photon-sidecar: unsend failed: " + (e && e.message ? e.message : String(e))
++        );
++        return ok(res, { unsent: false });
++      }
+     }
+     if (req.url === "/send-richlink") {
+       const { spaceId, url } = body || {};
