@@ -340,9 +340,13 @@ import type { StoredMessage, UserProfile } from '../../db/types.js';
  * Then **+2,614**, thinking sounds (194,783 → 197,397), policy.ts and Context.md: a sound she makes
  * before the words arrive goes out alone in its own bubble, picked by what is going on in her, and
  * Context.md gains a wide bank of them in the moment.
+ *
+ * Then **+932**, punctuation runs (197,397 → 198,329), policy.ts and Context.md: punctuation stretches
+ * like letters do, each shape carrying its own tone, picked fresh each time and rare; the period rule
+ * now bans only the lone closing period, so a run of marks stays.
  */
-const CORPUS_CHARS = 197_397;
-const CORPUS_SHA256 = '29199f954c63eb1b1e66b97128d37ae189a501813a93250bd547ccace63a3dd1';
+const CORPUS_CHARS = 198_329;
+const CORPUS_SHA256 = 'c57a84d5813af618cfcb571c65cb8e48396c451dbdecce500a81542ca8eb3feb';
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 

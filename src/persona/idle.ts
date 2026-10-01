@@ -255,12 +255,13 @@ function hasQuestionMark(text: string): boolean {
  * Did HER last turn end on a question? Exported because it is how the caller computes
  * `IdleFacts.endsInQuestion`, and computing it twice in two places is how the two copies end up
  * disagreeing about the fullwidth mark. Trailing whitespace and a closing bracket or quote are
- * ignored, because "so, thursday then?" survives being quoted.
+ * ignored, because "so, thursday then?" survives being quoted. The closing run of marks is read
+ * whole, so a question she shouts or trails off ("?!", "?..") still ends on a question.
  */
 export function endsInQuestion(text: string | null | undefined): boolean {
   const trimmed = (text ?? '').replace(/[\s"'’)\]}»”]+$/u, '');
-  const last = trimmed.slice(-1);
-  return !!last && QUESTION_MARKS.some(mark => mark === last);
+  const run = trimmed.match(/[?？¿!！.…]+$/u)?.[0] ?? '';
+  return QUESTION_MARKS.some(mark => run.includes(mark));
 }
 
 /**

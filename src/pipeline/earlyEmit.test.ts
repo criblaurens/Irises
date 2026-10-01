@@ -138,3 +138,8 @@ test('settleOnScreen: an echoed timestamp marker on the first bubble is the same
 test('settleOnScreen: nothing left to ship still records what went out', () => {
   assert.deepEqual(settleOnScreen(['oh nice.'], null), { text: null, record: 'oh nice.' });
 });
+
+test('remainderAfterPrefix: a final bubble that only adds a closing run of marks is already sent', () => {
+  const r = remainderAfterPrefix(['ohhh no. WAIT', 'u better not say it\'s u"...'], ['ohhh no.', 'WAIT', 'u better not say it\'s u']);
+  assert.deepEqual(r, { rest: [], diverged: false });
+});

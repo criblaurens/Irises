@@ -815,10 +815,10 @@ const PLAY_LEVEL_LINES: Record<0 | 1 | 2 | 3, string> = {
  *  NOT ONE DIGIT anywhere in this record: a number the model reads inside the section it grades
  *  itself on is a number to optimize. "Two slips" is a phrase, not a count. */
 export const LOOSE_LEVEL_LINES: Record<0 | 1 | 2 | 3, string> = {
-  0: 'English careful this turn. Slips near zero, no typos, no elongation. Any bubble with a number, date, price or bad news stays at this level even when the rest is looser.',
+  0: 'English careful this turn. Slips near zero, no typos, no elongation, no punctuation runs. Any bubble with a number, date, price or bad news stays at this level even when the rest is looser.',
   1: '',
   2: 'English loose this turn. Two slips per bubble, occasional typo left in, stretched words often, longer when funny or annoyed. A big feeling gets caps on the word it sits on.',
-  3: 'English messy this turn. Slips everywhere, subjects drop, typos stay uncorrected, letters stretch, punctuation mostly gone. Big feelings come out in caps, a word, a phrase or the whole bubble.',
+  3: 'English messy this turn. Slips everywhere, subjects drop, typos stay uncorrected, letters stretch, punctuation mostly gone or piled up. Big feelings come out in caps, a word, a phrase or the whole bubble.',
 };
 
 export const QUIET_HEADING = '## This turn is quiet (INTERNAL)';

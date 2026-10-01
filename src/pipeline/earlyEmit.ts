@@ -157,6 +157,12 @@ function norm(s: string): string {
   return s.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+/** A bubble with its closing run of marks (and a stray quote) gone: the words the stream already
+ *  sent when the model typed the run after the string had closed. */
+function bare(s: string): string {
+  return s.replace(/["'.!?…]+$/u, '');
+}
+
 /**
  * The raw text of `bubble` after its first `n` normalized characters, when that cut lands on a word
  * boundary; null when it would land inside a word (that is a different sentence, not a longer one).
@@ -198,6 +204,8 @@ export function remainderAfterPrefix(finalBubbles: string[], prefix: string[]): 
       remaining = remaining.slice(nb.length).trimStart();
       continue;
     }
+    // Only a closing run of marks is new: the words are on their screen, and a run alone is no bubble.
+    if (bare(nb) && remaining === bare(nb)) { remaining = ''; continue; }
     if (nb.startsWith(`${remaining} `)) {
       const tail = cutAfterNormalized(finalBubbles[i], remaining);
       if (tail !== null) {

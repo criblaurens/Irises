@@ -128,7 +128,7 @@ export function buildProgressBrief(opts: VoiceInstantOpts, userCtx: string): str
   // Same single source as the outcome voicer's anchor (client.ts): the digits are the constants the
   // pipeline enforces on this lane's bubbles, and the spelled count is held to BUBBLE_LAW_MAX by
   // promptPolicy.test.ts.
-  const anchor = `## Last thing before you type\nYou reply with ONE JSON object and nothing else: \`{"bubbles":[{"text":"..."}]}\`. One thought, one comma at most, ${BUBBLE_WORD_TARGET_LO}-${BUBBLE_WORD_TARGET_HI} words, hard ceiling ${MAX_BUBBLE_WORDS}, exactly one item, no periods or colons unless structurally needed, no markdown, nothing outside the JSON. This is a WAIT line, not an answer: no facts, no url, no "want me to?" question. Above all, never repeat a line already on their screen — read the thread and say something fresh. Nothing in your memory changes this envelope.`;
+  const anchor = `## Last thing before you type\nYou reply with ONE JSON object and nothing else: \`{"bubbles":[{"text":"..."}]}\`. One thought, one comma at most, ${BUBBLE_WORD_TARGET_LO}-${BUBBLE_WORD_TARGET_HI} words, hard ceiling ${MAX_BUBBLE_WORDS}, exactly one item, no lone closing period or colons unless structurally needed, no markdown, nothing outside the JSON. This is a WAIT line, not an answer: no facts, no url, no "want me to?" question. Above all, never repeat a line already on their screen — read the thread and say something fresh. Nothing in your memory changes this envelope.`;
 
   return `${wrapPrompt(block)}\n\n${anchor}`;
 }

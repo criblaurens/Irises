@@ -504,7 +504,7 @@ test('both envelope schemas describe a bubble with the same single-sourced sente
     const props = schema.properties as { bubbles: { items: { properties: { text: { description: string } } } } };
     return props.bubbles.items.properties.text.description;
   };
-  const expected = `one thought, one send; one comma at most, a second comma means two bubbles. Aim for ${BUBBLE_WORD_TARGET_LO}-${BUBBLE_WORD_TARGET_HI} words. Avoid periods and colons`;
+  const expected = `one thought, one send; one comma at most, a second comma means two bubbles. Aim for ${BUBBLE_WORD_TARGET_LO}-${BUBBLE_WORD_TARGET_HI} words. Avoid a lone closing period and colons`;
   assert.equal(descOf(BUBBLE_ENVELOPE_SCHEMA), expected);
   assert.equal(descOf(MM_ENVELOPE_SCHEMA), expected, 'MM reads the same sentence, not its own copy');
   assert.equal(descOf(buildEnvelopeSchema([{ name: 'x', description: 'd', inputSchema: { type: 'object', properties: {} } }])), expected);
@@ -608,4 +608,9 @@ test('a tool-call item that spills the flat args after `args` keeps the tool nam
   const r = parseReply(raw);
   assert.deepEqual(r.toolCalls, [{ name: 'unsend', input: { bubble: '1', why: 'they_are_annoyed' } }]);
   assert.equal(r.legacyText, 'sorry');
+});
+
+test('a run of marks typed after the closing quote is moved back inside the bubble', () => {
+  const r = parseReply('{"confidence_level":85,"tool_calls":null,"bubbles":[{"text":"ohhh no. WAIT"},{"text":"u better not say it\'s u"...","re":null}],"status":null}');
+  assert.equal(r.legacyText, 'ohhh no. WAIT\n---\nu better not say it\'s u...');
 });

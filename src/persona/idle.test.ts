@@ -177,6 +177,11 @@ test('endsInQuestion reads her last turn in any script, through a closing quote'
   assert.equal(endsInQuestion('so, thursday then?"'), true, 'a quoted question is still a question');
   assert.equal(endsInQuestion('sending it now.'), false);
   assert.equal(endsInQuestion('why not? sending it now.'), false, 'a mark mid-sentence is not the end');
+  assert.equal(endsInQuestion('u serious?!'), true, 'a question shouted is still a question');
+  assert.equal(endsInQuestion('u sure?..'), true, 'a question trailing off is still a question');
+  assert.equal(endsInQuestion('since when???'), true);
+  assert.equal(endsInQuestion('LETS GO!!!'), false);
+  assert.equal(endsInQuestion('ok...'), false);
   assert.equal(endsInQuestion(''), false);
   assert.equal(endsInQuestion(null), false);
   assert.equal(endsInQuestion(undefined), false);

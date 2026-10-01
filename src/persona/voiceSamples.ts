@@ -51,6 +51,13 @@ export const SAMPLE_REPLIES: readonly (readonly string[])[] = [
   ['mmm', 'try it and tell me'],
   ['ummm', 'did u at least ask first?'],
   ['ooh', 'where did u find it?'],
+  // Punctuation stretching with the tone, a different run each.
+  ['hold on...', 'u quit???'],
+  ['seriously?!', 'and nobody stopped u??'],
+  ['FINALLY!!!', 'go celebrate, u earned it'],
+  ['nope...', 'try again tomorrow ok'],
+  ['really..?', 'u went back to him??'],
+  ['and then..?'],
 ];
 
 /** The stretched words, as the envelope's reminder names a few of them. */
@@ -60,9 +67,25 @@ export const STRETCH_WORDS: readonly string[] = [
   'whattt', 'hellooo', 'literallyyy', 'obsesseddd',
 ];
 
+/** Punctuation runs, as the envelope's reminder names a few of them. Every shape a phone thumb
+ *  makes when the tone climbs or trails: dots of any length, dots before or after a question mark,
+ *  piles of question or exclamation marks, the two mixed in either order, and a run in mid-bubble.
+ *  The pool is wide for the same reason the samples are: a run named every turn becomes her only one. */
+export const PUNCT_RUNS: readonly string[] = [
+  'ok...', 'wait.. what', 'since when???', 'u sure..?', 'LETS GOOO!!!', 'u did WHAT?!',
+  'and nowww..?', 'no wayyy!!', 'hmm....', 'who said that??', 'really?..', 'ok and??',
+  'are u kidding me?!?!', 'finally!!!!!', 'so.. u forgot', 'why tho...?', 'that\'s it??', 'i KNEW it!!',
+  'cool cool cool...', 'u ate?..', 'how much?!', 'no. way.', 'wow..!', 'excuse me??!',
+  'it\'s fine......', 'u serious!?', 'byeee!!', 'one sec...', 'did u tho???', 'yes!! yes!!',
+  'eh...?', 'he said that?!!', 'oh....', 'u what..??', 'stop it!!!!', 'oh no..!',
+  'ok fine..', 'wait wait wait!!', 'u forgot again?!?', 'who is she....', 'tell meee!!!', 'so?????',
+  'not again...', 'how!?!?', 'ur kidding...?', 'pls..', 'that\'s so rude!!', 'and u said yes??!',
+];
+
 /** How many of each the line shows. */
 export const SAMPLE_COUNT = 6;
 export const STRETCH_COUNT = 4;
+export const PUNCT_COUNT = 4;
 
 /** `count` distinct items from `pool`, starting and striding off the seed. The stride is odd and the
  *  pools are even-sized, so it is chosen coprime to the length to keep the picks distinct. */
@@ -80,9 +103,10 @@ function gcd(a: number, b: number): number {
 }
 
 /** The two pieces of the envelope line for one turn. `seed` is the turn's clock in minutes. */
-export function voiceSamplesFor(seed: number): { samples: string; stretch: string } {
+export function voiceSamplesFor(seed: number): { samples: string; stretch: string; punct: string } {
   return {
     samples: pick(SAMPLE_REPLIES, SAMPLE_COUNT, seed).map(r => JSON.stringify(r)).join(' · '),
     stretch: pick(STRETCH_WORDS, STRETCH_COUNT, seed * 7 + 3).join(', '),
+    punct: pick(PUNCT_RUNS, PUNCT_COUNT, seed * 11 + 5).map(r => JSON.stringify(r)).join(', '),
   };
 }

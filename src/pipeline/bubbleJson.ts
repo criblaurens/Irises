@@ -90,7 +90,7 @@ export const BUBBLE_HARD_CAP = 15;
 export const MAX_BUBBLES = BUBBLE_HARD_CAP;
 
 // The one sentence both envelope schemas use to describe a bubble's text.
-const BUBBLE_TEXT_DESCRIPTION = `one thought, one send; one comma at most, a second comma means two bubbles. Aim for ${BUBBLE_WORD_TARGET_LO}-${BUBBLE_WORD_TARGET_HI} words. Avoid periods and colons`;
+const BUBBLE_TEXT_DESCRIPTION = `one thought, one send; one comma at most, a second comma means two bubbles. Aim for ${BUBBLE_WORD_TARGET_LO}-${BUBBLE_WORD_TARGET_HI} words. Avoid a lone closing period and colons`;
 
 // The exact envelope shape, as a JSON Schema for OpenRouter structured outputs (response_format:
 // json_schema). This ENFORCES valid JSON at the API — the fix for weaker tool-calling models
@@ -244,9 +244,11 @@ function tryParse(s: string): unknown | undefined {
 }
 
 // jsonrepair throws on input it can't rescue; swallow to '' so the follow-up JSON.parse just misses.
+// One slip is moved back first: a run of marks typed after a string's closing quote (`"it's u"..."`)
+// belongs inside it. The quote must follow a letter of text, so a `"..."` value itself never matches.
 function safeRepair(s: string): string {
   try {
-    return jsonrepair(s);
+    return jsonrepair(s.replace(/([^\s"\\:,[{])"([.!?…]+)"/gu, '$1$2"'));
   } catch {
     return '';
   }
