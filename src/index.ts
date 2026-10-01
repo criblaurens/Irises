@@ -51,6 +51,7 @@ import { resolveOutboundBubbles, resolveReactionTarget, stripReplyTag } from './
 import { noteSend, countSendsSince, lastSendAt } from './state/outboundLog.js';
 import { stripTimestampMarker } from './pipeline/chatTime.js';
 import { recordSentBubble } from './db/repositories/sentMessages.js';
+import { executeUnsend, noteInbound, noteSentBubble, type UnsendRequest } from './state/unsend.js';
 import { recordInboundMessage } from './db/repositories/inboundMessages.js';
 import { resolveTappedReply, type ResolvedReply } from './state/replyResolution.js';
 import { createDiagnosticsRouter } from './diagnostics/dashboard.js';
@@ -139,6 +140,7 @@ interface AgentChatResult {
   groupChatIcon: { prompt: string } | null;
   removeMember: string | null;
   delegatedTask?: OpsTask | null;
+  unsend?: UnsendRequest | null;
   // The bubble-count guard fired on the parse behind `text` (agents/convo/shared.ts → ChatResponse).
   // Rides the reply itself so the send boundary reports the cap against the reply it ships; optional
   // so an agent that doesn't parse a bubble envelope still satisfies this shape.
@@ -179,6 +181,10 @@ const getChat = (chatId: string) => resolveChannel(chatId).getChat(chatId);
 const sendReaction = (chatId: string, messageId: string, reaction: Reaction, operation?: 'add' | 'remove') => {
   const ch = resolveChannel(chatId);
   return ch.caps.reactions ? ch.sendReaction(chatId, messageId, reaction, operation) : Promise.resolve();
+};
+const unsendMessage = (chatId: string, messageId: string): Promise<boolean> => {
+  const ch = resolveChannel(chatId);
+  return ch.unsendMessage ? ch.unsendMessage(chatId, messageId) : Promise.resolve(false);
 };
 const shareContactCard = (chatId: string) => {
   const ch = resolveChannel(chatId);
@@ -530,6 +536,7 @@ async function sendOneBubble(
   // inbound id) — the join key when a later tapped reply collapses to that thread root.
   // Fire-and-forget; never blocks the send.
   if (sent?.message?.id) void recordSentBubble(chatId, sent.message.id, text, replyTo?.message_id);
+  if (sent?.message?.id) noteSentBubble(chatId, sent.message.id, text);
   // If MORE bubbles are coming, re-assert the dots immediately so there's no dark gap — the user
   // sees "bubble → dots again" = more coming. Not after the last one, where a ping racing past the
   // send would read as "still typing" with nothing behind it. Fire-and-forget: startTyping swallows
@@ -855,7 +862,7 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
     earlySend,
   }).catch(closeEarlyOnFailure);
   turnOut = out;
-  const { text: responseText, reaction, renameChat, rememberedUser, generatedImage, groupChatIcon, removeMember, delegatedTask, hardCapped, turnTrace } = out;
+  const { text: responseText, reaction, renameChat, rememberedUser, generatedImage, groupChatIcon, removeMember, delegatedTask, hardCapped, turnTrace, unsend } = out;
   console.log(`[timing] agent: ${Date.now() - start}ms`);
   console.log(`[debug] responseText: ${responseText ? `"${responseText.substring(0, 50)}..."` : 'null'}, renameChat: ${renameChat || 'null'}, generatedImage: ${generatedImage ? 'yes' : 'null'}, removeMember: ${removeMember || 'null'}`);
   // Send reaction if agent wants to. On a burst the model may target a specific [msg N] via `re` (e.g.
@@ -864,6 +871,20 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
   if (reaction) {
     await sendReaction(chatId, resolveReactionTarget(reaction.re, incomingMessageIds, messageId), reaction);
     console.log(`[timing] reaction: ${Date.now() - start}ms`);
+  }
+
+  // Take back one bubble of her previous reply before this reply's bubbles go out. Either way it
+  // lands in her history, so she knows whether they can still see it.
+  if (unsend) {
+    const outcome = await executeUnsend(chatId, unsend, unsendMessage);
+    if (outcome.status === 'invalid') console.warn(`[main] unsend: bubble ${unsend.bubble} was not on offer (chat ${chatId})`);
+    else {
+      console.log(`[main] unsend ${outcome.status} (${unsend.why}, chat ${chatId})`);
+      const quoted = outcome.text.replace(/\s+/g, ' ').slice(0, 80);
+      await addMessage(chatId, 'assistant', outcome.status === 'unsent'
+        ? `[unsent "${quoted}"; they no longer see it]`
+        : `[tried to unsend "${quoted}"; it did not go through, they still see it]`);
+    }
   }
 
   // Rename group chat if agent wants to
@@ -1094,6 +1115,7 @@ export function enqueueInbound(
   // upstream); it feeds arrivals/gap detection. Falls back to now when absent (web/CLI, or an engine
   // that doesn't forward timestamps) — exactly the prior behavior.
   pending.messages.push({ from, text, messageId, media, incomingReplyTo, receivedAt: receivedAt ?? Date.now() });
+  noteInbound(chatId);
 
   // Classify DURING the settle window (the user chose this over folding the classifier into the
   // convo call): the verdict for the burst as it stands right now is computed while we wait for

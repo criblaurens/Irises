@@ -90,6 +90,15 @@ export function IrisesApp() {
         );
         return;
       }
+      case "unsend": {
+        if (!event.messageId) return;
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === event.messageId ? { ...message, content: "Irises unsent a message" } : message
+          )
+        );
+        return;
+      }
       case "read":
       default:
         // No client-visible effect for read receipts / unknown types.

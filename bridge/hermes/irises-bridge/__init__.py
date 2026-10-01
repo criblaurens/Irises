@@ -471,6 +471,9 @@ class _SendHandler(BaseHTTPRequestHandler):
         if self.path == "/typing":
             self._handle_typing()
             return
+        if self.path == "/unsend":
+            self._handle_unsend()
+            return
         if self.path != "/send":
             self._reply(404, {"error": "unknown path"})
             return
@@ -576,6 +579,44 @@ class _SendHandler(BaseHTTPRequestHandler):
                 self._reply(200, {"ok": True, "supported": False, "detail": str(exc)[:200]})
         except Exception as exc:  # noqa: BLE001
             self._reply(200, {"ok": True, "supported": False, "detail": str(exc)[:200]})
+
+    def _handle_unsend(self) -> None:
+        """POST /unsend {platform, chat_id, message_id}. Takes back one of Irises's own messages through
+        the adapter's delete_message (Telegram has one; the base adapter answers False). A platform that
+        can't is a 200 unsent:false, never an error: Irises keeps the bubble and says it's still there."""
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
+        except Exception:  # noqa: BLE001
+            self._reply(400, {"error": "invalid json"})
+            return
+        platform, chat_id, message_id = body.get("platform"), body.get("chat_id"), body.get("message_id")
+        if not platform or not chat_id or not message_id:
+            self._reply(400, {"error": "platform, chat_id, message_id required"})
+            return
+        if not _await_gateway():
+            self._reply(503, {"error": "gateway not ready", "retryable": True})
+            return
+        gateway, loop = _GW
+        try:
+            from gateway.platforms.base import Platform
+            try:
+                resolved = Platform(platform)
+            except ValueError:
+                self._reply(400, {"error": f"platform '{platform}' is not a platform this hermes knows"})
+                return
+            adapter = gateway.adapters.get(resolved)
+            if adapter is None:
+                self._reply(400, {"error": f"platform '{platform}' is not connected on this hermes"})
+                return
+            delete = getattr(adapter, "delete_message", None)
+            if not callable(delete):
+                self._reply(200, {"ok": True, "unsent": False})
+                return
+            done = asyncio.run_coroutine_threadsafe(delete(str(chat_id), str(message_id)), loop).result(timeout=8)
+            self._reply(200, {"ok": True, "unsent": done is True})
+        except Exception as exc:  # noqa: BLE001
+            log.warning("irises-bridge: unsend on %s:%s failed: %s", platform, chat_id, exc)
+            self._reply(200, {"ok": True, "unsent": False, "detail": str(exc)[:200]})
 
     @staticmethod
     def _log_typing_once(platform: str, supported: bool, method: str = "") -> None:

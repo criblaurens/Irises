@@ -602,3 +602,10 @@ test('the report is parked per chat for the turn receipt to fold in', () => {
   noteBubbleReport('chat:a', second);
   assert.deepEqual(lastBubbleReport('chat:a'), second, 'the newest reply wins');
 });
+
+test('a tool-call item that spills the flat args after `args` keeps the tool name it wrote first', () => {
+  const raw = '{"confidence_level":92,"tool_calls":[{"name":"unsend","args":{"bubble":"1","why":"they_are_annoyed"},"type":null,"name":null,"fact":null}],"bubbles":[{"text":"sorry","re":null}],"status":{}}';
+  const r = parseReply(raw);
+  assert.deepEqual(r.toolCalls, [{ name: 'unsend', input: { bubble: '1', why: 'they_are_annoyed' } }]);
+  assert.equal(r.legacyText, 'sorry');
+});

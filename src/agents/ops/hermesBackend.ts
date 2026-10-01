@@ -1697,4 +1697,27 @@ export class HermesBackend implements EngineBackend {
       clearTimeout(timer);
     }
   }
+
+  /** Bridge unsend: POST /unsend on the same listener, which calls the adapter's delete_message.
+   *  `unsent:true` is the only success; every other answer or failure reads false. */
+  async channelUnsend(platform: string, chatId: string, messageId: string): Promise<boolean> {
+    const bridgeUrl = (process.env.HERMES_BRIDGE_URL || 'http://127.0.0.1:8655').replace(/\/$/, '');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const res = await this.deps.fetchFn(`${bridgeUrl}/unsend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-bridge-token': process.env.ENGINE_PUSH_TOKEN || '' },
+        body: JSON.stringify({ platform, chat_id: chatId, message_id: messageId }),
+        signal: controller.signal,
+      });
+      if (!res.ok) return false;
+      const body = await res.json().catch(() => ({})) as { unsent?: unknown };
+      return body.unsent === true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }

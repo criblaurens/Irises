@@ -150,6 +150,16 @@ CREATE INDEX IF NOT EXISTS idx_sent_messages_reply_root
   ON sent_messages(chat_id, reply_root_id) WHERE reply_root_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_sent_messages_created ON sent_messages(created_at);
 
+-- Bubbles Irises took back (state/unsend.ts). The newest row per chat is the unsend cooldown.
+CREATE TABLE IF NOT EXISTS unsent_messages (
+  message_id TEXT PRIMARY KEY,
+  chat_id    TEXT NOT NULL,
+  content    TEXT NOT NULL,
+  why        TEXT NOT NULL,
+  unsent_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_unsent_messages_chat ON unsent_messages(chat_id, unsent_at DESC);
+
 CREATE TABLE IF NOT EXISTS inbound_messages (
   message_id    TEXT PRIMARY KEY,
   chat_id       TEXT NOT NULL,
@@ -449,6 +459,7 @@ export function resetStorageForTests(): void {
     DELETE FROM thread_inventory;
     DELETE FROM hook_state;
     DELETE FROM sent_messages;
+    DELETE FROM unsent_messages;
     DELETE FROM inbound_messages;
     DELETE FROM memory_short;
     DELETE FROM forget_epochs;

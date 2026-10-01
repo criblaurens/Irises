@@ -104,6 +104,10 @@ export interface Channel {
   // resolution degrades to an honest 'unresolved'. Must never throw — return null for "couldn't pull it up".
   getMessage?(chatId: string, messageId: string): Promise<FetchedMessage | null>;
 
+  // Optional: take back one of Irises's own sent messages (state/unsend.ts). True only when the
+  // transport confirmed it is gone. Must never throw.
+  unsendMessage?(chatId: string, messageId: string): Promise<boolean>;
+
   // Optional — invoked only when the matching cap is true.
   shareContactCard?(chatId: string): Promise<void>;
   renameGroupChat?(chatId: string, displayName: string): Promise<void>;

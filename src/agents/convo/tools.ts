@@ -364,6 +364,23 @@ export const REMOVE_MEMBER_TOOL: LlmToolDef = {
   inputSchema: { type: 'object', properties: { handle: { type: 'string' } }, required: ['handle'] },
 };
 
+/** Offered only while state/unsend.ts says a bubble of her previous reply is still in reach and the
+ *  week's cooldown is clear. Static on purpose: tool docs ride the cached system message, so the
+ *  numbered bubbles live in the per-turn `unsend` section (convo/shared.ts). The irritated ground is
+ *  checked against her mood in code, so the description never names a threshold. */
+export const UNSEND_TOOL: LlmToolDef = {
+  name: 'unsend',
+  description: "Retract ONE bubble from your previous reply; the ones still in reach are numbered in this turn's take-back section. Two grounds: a bubble of yours genuinely annoyed or hurt them, or you yourself are irritated enough that you want it back. Rough or profane words alone prove nothing; read them against how this person usually talks and how close you are. If you cannot tell whether they are genuinely annoyed, ask one short question carrying your read and leave it standing this turn. Retracting a mistake never replaces owning it: the reply still owns it, and you never claim you didn't say what you retracted. You MUST also send at least one bubble.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      bubble: { type: 'number', description: 'The number beside the bubble in the take-back section. One call retracts exactly one.' },
+      why: { type: 'string', enum: ['they_are_annoyed', 'i_am_irritated'], description: 'Which ground this rests on: they_are_annoyed = a bubble of yours genuinely annoyed or hurt them; i_am_irritated = you yourself are irritated enough that you want it back.' },
+    },
+    required: ['bubble', 'why'],
+  },
+};
+
 /**
  * Every tool one Convo turn is offered, in the order it is offered them.
  *
@@ -384,6 +401,8 @@ export const REMOVE_MEMBER_TOOL: LlmToolDef = {
 export function convoToolList(opts: {
   engineName: 'hermes' | 'openclaw' | null;
   isGroupChat: boolean;
+  /** A bubble of her previous reply is still in reach this turn (state/unsend.ts unsendOffer). */
+  unsend?: boolean;
 }): LlmToolDef[] {
   const tools: LlmToolDef[] = [
     REACTION_TOOL, rememberUserTool(), delegateToOpsTool(opts.engineName), setPreferenceTool(),
@@ -394,5 +413,7 @@ export function convoToolList(opts: {
     UPDATE_MEMORY_TOOL, RECALL_MEMORY_TOOL, CHECK_ERROR_LOG_TOOL,
   ];
   if (opts.isGroupChat) tools.push(RENAME_CHAT_TOOL, REMOVE_MEMBER_TOOL);
+  // Last, so the turns that offer it leave every other tool's order (and shared-arg docs) untouched.
+  if (opts.unsend) tools.push(UNSEND_TOOL);
   return tools;
 }
