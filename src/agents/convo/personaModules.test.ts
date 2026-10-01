@@ -336,9 +336,13 @@ import type { StoredMessage, UserProfile } from '../../db/types.js';
  * Then **+308**, ask-before-guessing (194,475 → 194,783), Context.md alone: a message that reads two
  * ways gets one short question with her guess inside before any answer, at any stakes; guessing
  * stays for taste and predictions, never for what they said.
+ *
+ * Then **+2,614**, thinking sounds (194,783 → 197,397), policy.ts and Context.md: a sound she makes
+ * before the words arrive goes out alone in its own bubble, picked by what is going on in her, and
+ * Context.md gains a wide bank of them in the moment.
  */
-const CORPUS_CHARS = 194_783;
-const CORPUS_SHA256 = '9abe0e53581b23815a2e629d7c51193623fc5e8341dc26b675d5900df6369ab4';
+const CORPUS_CHARS = 197_397;
+const CORPUS_SHA256 = '29199f954c63eb1b1e66b97128d37ae189a501813a93250bd547ccace63a3dd1';
 
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 

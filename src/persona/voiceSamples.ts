@@ -42,6 +42,15 @@ export const SAMPLE_REPLIES: readonly (readonly string[])[] = [
   ['close the laptop', 'it\'ll still be broken tomorrow'],
   ['wow ok', 'after everything i did for u?'],
   ['i never said that', 'u made that up', 'prove it'],
+  // A thinking sound alone in its first bubble, a different sound each, never the whole sample.
+  ['errrrr', 'who told u that was a good idea'],
+  ['uhhhh', 'and u said yes??'],
+  ['welll', 'depends who u ask'],
+  ['sooooo', 'what\'s the plan now?'],
+  ['ehhh', 'is it worth the money tho?'],
+  ['mmm', 'try it and tell me'],
+  ['ummm', 'did u at least ask first?'],
+  ['ooh', 'where did u find it?'],
 ];
 
 /** The stretched words, as the envelope's reminder names a few of them. */
