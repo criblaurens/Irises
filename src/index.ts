@@ -37,6 +37,7 @@ import { createOpsTaskRecovery, opsDurableTasksEnabled } from './state/opsTaskDu
 import { estimateOpsEta } from './agents/etaEstimate.js';
 import { browserLegBudgetFor } from './agents/ops/client.js';
 import { withChatLock } from './state/sendQueue.js';
+import { LiveTurn } from './state/liveTurn.js';
 import { createMouth, type SpeakContent, type SpeakOpts, type SpeakResult } from './state/mouth.js';
 import { registerPendingInboundProvider } from './state/inboundGlance.js';
 import { isTypingFresh as isTypingFreshAt, shouldFlush, effectiveSettleMs } from './state/batchTiming.js';
@@ -213,6 +214,9 @@ interface PendingChat {
   // history). Held here ONLY so the pending-inbound glance below can see it — an out-of-band voicer
   // must know these texts exist even though neither the queue nor history contains them yet.
   inFlightBatch: PendingMessage[] | null;
+  // The run being answered right now, which a newer text from its sender replaces while it is still
+  // only being written (state/liveTurn.ts). Null between runs.
+  turn: LiveTurn | null;
   agentClient: AgentClient;
 }
 
@@ -322,6 +326,7 @@ async function processPendingChat(chatId: string) {
   if (pending.messages.length === 0) { pendingChats.delete(chatId); return; }
 
   pending.isProcessing = true;
+  let superseded = false;
   try {
     const messagesToProcess = pending.messages.splice(0);
     if (messagesToProcess.length === 0) return;
@@ -337,6 +342,8 @@ async function processPendingChat(chatId: string) {
     if (runs.length > 1) console.log(`[main] Batch spans ${runs.length} sender runs — answering each in turn`);
 
     for (const run of runs) {
+      const turn = new LiveTurn(run[0].from);
+      pending.turn = turn;
       // Combine the run into ONE agent turn. mergeBurst keeps the per-message ids + numbered
       // manifest (older code discarded everything but the last id) so each outgoing bubble can
       // thread back to the specific incoming message it answers.
@@ -371,8 +378,19 @@ async function processPendingChat(chatId: string) {
               return late;
             },
           },
+          turn,
         );
       } catch (error) {
+        if (turn.signal.aborted) {
+          // A newer text replaced this reply before any of it was real. Back to the front of the
+          // queue, this run (drained lates included) then the runs after it, ahead of the new text,
+          // to be answered once as the burst it is.
+          console.log(`[main] newer message landed while the reply was being written — answering the whole burst instead (chat ${chatId})`);
+          superseded = true;
+          pending.messages.unshift(...run, ...messagesToProcess.filter(m => !run.includes(m)));
+          messagesToProcess.length = 0;
+          break;
+        }
         console.error(`[main] Error processing run for ${merged.from} in chat ${chatId}:`, error);
         // A turn that dies here usually answered nobody — the user is left on read. Durable, not just
         // logged. The exception is a turn whose opening already went out early (processMessage tags
@@ -384,6 +402,7 @@ async function processPendingChat(chatId: string) {
           ...(answeredInPart ? { detail: { answeredInPart } } : {}),
         });
       } finally {
+        if (pending.turn === turn) pending.turn = null;
         // This run's texts (including drained lates — same object identities) are recorded now:
         // stop advertising them to the pending-inbound glance while later runs process.
         for (const m of run) {
@@ -398,8 +417,13 @@ async function processPendingChat(chatId: string) {
   } finally {
     pending.isProcessing = false;
     pending.inFlightBatch = null;
-    // Messages that arrived while we were processing become the next batch.
-    if (pending.messages.length > 0) scheduleTick(chatId, BATCH_SETTLE_MS);
+    // Messages that arrived while we were processing become the next batch. A replaced reply's burst
+    // goes as soon as the newest text's own settle window closes (onTick measures it from that text),
+    // with the classifiers warmed for the burst as it now stands.
+    if (superseded) {
+      warmBurst(chatId, pending);
+      scheduleTick(chatId, 0);
+    } else if (pending.messages.length > 0) scheduleTick(chatId, BATCH_SETTLE_MS);
     else pendingChats.delete(chatId);
   }
 }
@@ -640,7 +664,7 @@ const proactive = createProactiveDelivery({ sendFollowUp });
 // the turn fold in messages that arrive while it WAITS for the chat mouth (see the drain block
 // inside the critical section below); `batch` must be the same array the pending-inbound glance
 // reads (pending.inFlightBatch), so drained texts stay visible to out-of-band voicers.
-async function processMessage(agentClient: AgentClient, chatId: string, from: string, text: string, messageId: string, media: IncomingMedia, incomingReplyTo?: ReplyTo, incomingMessageIds: string[] = [], manifest: { text: string; handle: string; receivedAt: number }[] = [], earliestReceivedAt = 0, lateArrivals?: { batch: PendingMessage[]; drain: () => PendingMessage[] }) {
+async function processMessage(agentClient: AgentClient, chatId: string, from: string, text: string, messageId: string, media: IncomingMedia, incomingReplyTo?: ReplyTo, incomingMessageIds: string[] = [], manifest: { text: string; handle: string; receivedAt: number }[] = [], earliestReceivedAt = 0, lateArrivals?: { batch: PendingMessage[]; drain: () => PendingMessage[] }, turn?: LiveTurn) {
 
   const start = Date.now();
   console.log(`[main] Processing message from ${from}`);
@@ -779,6 +803,8 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
       earliestReceivedAt = remerged.earliestReceivedAt;
     }
   }
+  // Everything queued is in. From here until the reply commits, a newer text replaces it.
+  turn?.arm();
   // Per-message staleness, computed AFTER the drain so a folded-in late message is measured against the
   // sends that actually preceded it: how many of Irises's bubbles landed after each text-bearing message
   // arrived. arrivals[i].sendsAfterArrival > 0 ⇒ [msg i+1] was typed before bubbles it never saw, so the
@@ -811,6 +837,8 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
   // It reports what of the sentence actually went out rather than throwing, so a send that fails on
   // its second piece still leaves the first one in the turn's record.
   const earlySend = async (sentence: string): Promise<{ shown: string; error?: unknown }> => {
+    // A bubble on their screen is the reply becoming real: no newer text replaces it after this.
+    if (turn && !turn.commit()) return { shown: '', error: turn.signal.reason };
     const shown: string[] = [];
     try {
       for (const piece of splitIntoBubbles(sentence)) {
@@ -860,6 +888,7 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
     // message Irises has already sent past as answering an older state of the thread.
     arrivals,
     earlySend,
+    supersede: turn,
   }).catch(closeEarlyOnFailure);
   turnOut = out;
   const { text: responseText, reaction, renameChat, rememberedUser, generatedImage, groupChatIcon, removeMember, delegatedTask, hardCapped, turnTrace, unsend } = out;
@@ -1090,33 +1119,11 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
 }
 
 /**
- * Enqueue one inbound message into the per-chat batching/mouth pipeline. This is the SINGLE inbound
- * entry every channel funnels through — the web/CLI channel and the engine bridge — so
- * burst-merge, the rolling settle window, the late-arrival fold, the mouth lock, and diagnostics
- * all apply uniformly regardless of transport.
+ * Warm the classifiers for the burst as it stands (the last same-sender run in the queue). Called on
+ * every inbound text, and again when a replaced reply's run goes back in front of the newer text, so
+ * the restarted turn finds its verdicts already computed for the string it will read.
  */
-export function enqueueInbound(
-  agentClient: AgentClient,
-  chatId: string,
-  from: string,
-  text: string,
-  messageId: string,
-  media: IncomingMedia,
-  incomingReplyTo?: ReplyTo,
-  receivedAt?: number,
-): void {
-  if (!pendingChats.has(chatId)) {
-    pendingChats.set(chatId, {
-      chatId, messages: [], timer: null, lastActivityAt: 0, isProcessing: false, inFlightBatch: null, agentClient,
-    });
-  }
-  const pending = pendingChats.get(chatId)!;
-  // receivedAt is the message's real platform send time when the bridge forwarded one (normalized
-  // upstream); it feeds arrivals/gap detection. Falls back to now when absent (web/CLI, or an engine
-  // that doesn't forward timestamps) — exactly the prior behavior.
-  pending.messages.push({ from, text, messageId, media, incomingReplyTo, receivedAt: receivedAt ?? Date.now() });
-  noteInbound(chatId);
-
+function warmBurst(chatId: string, pending: PendingChat): void {
   // Classify DURING the settle window (the user chose this over folding the classifier into the
   // convo call): the verdict for the burst as it stands right now is computed while we wait for
   // them to stop typing, so the gate in chat() reads a finished (or in-flight, joined) answer and
@@ -1139,6 +1146,8 @@ export function enqueueInbound(
   // its own, and the turn then folds it into the remerged whole — a different string, so that turn
   // makes its own call exactly as it did before the warm existed.
   const run = splitBurstBySender(pending.messages).at(-1) ?? [];
+  const from = run.at(-1)?.from;
+  if (!from) return;
   const burstText = mergeBurst(run).combinedText.trim();
   if (hooksEnabled() && burstText && run.every(m => !hasMedia(m.media))
       && classifyNeeded(burstText, {
@@ -1151,6 +1160,42 @@ export function enqueueInbound(
   // gate skips is the one most likely to need reach. Warmed here so the verdict lands during the
   // settle, before the early-emit pre-check and the routing gate read it (convo/reachClassify.ts).
   if (burstText) warmReachClassify({ chatId, handle: from }, burstText);
+}
+
+/**
+ * Enqueue one inbound message into the per-chat batching/mouth pipeline. This is the SINGLE inbound
+ * entry every channel funnels through — the web/CLI channel and the engine bridge — so
+ * burst-merge, the rolling settle window, the late-arrival fold, the mouth lock, and diagnostics
+ * all apply uniformly regardless of transport.
+ */
+export function enqueueInbound(
+  agentClient: AgentClient,
+  chatId: string,
+  from: string,
+  text: string,
+  messageId: string,
+  media: IncomingMedia,
+  incomingReplyTo?: ReplyTo,
+  receivedAt?: number,
+): void {
+  if (!pendingChats.has(chatId)) {
+    pendingChats.set(chatId, {
+      chatId, messages: [], timer: null, lastActivityAt: 0, isProcessing: false, inFlightBatch: null, turn: null, agentClient,
+    });
+  }
+  const pending = pendingChats.get(chatId)!;
+  // receivedAt is the message's real platform send time when the bridge forwarded one (normalized
+  // upstream); it feeds arrivals/gap detection. Falls back to now when absent (web/CLI, or an engine
+  // that doesn't forward timestamps) — exactly the prior behavior.
+  pending.messages.push({ from, text, messageId, media, incomingReplyTo, receivedAt: receivedAt ?? Date.now() });
+  noteInbound(chatId);
+  // Their reply is still being written: drop it, so the burst is answered once with this text in it
+  // (processPendingChat puts the run back in front of this one). Only when this text would join that
+  // run — in a group, another sender's run queued in between keeps its place and this one waits.
+  const joinsTurn = (pending.inFlightBatch ?? []).every(m => m.from === from) && pending.messages.every(m => m.from === from);
+  if (joinsTurn) pending.turn?.supersedeBy(from);
+
+  warmBurst(chatId, pending);
 
   // Index this inbound message's id → text so a LATER tapped reply that the transport collapses to
   // the thread root (this user's own message) resolves to what they said. Sits HERE, in the single

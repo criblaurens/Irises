@@ -9,7 +9,7 @@ import { buildContextBlockWithHot } from '../../memory/dossier.js';
 import { memoryRelevanceEnabled, shortEntryLabel, threadHit } from '../../memory/relevance.js';
 import { renderedTurnFocusHits, type TurnFocusHit, type TurnFocusInput } from './turnFocus.js';
 import { getActiveOps, getRecentlyEndedOps } from '../../state/opsCoordination.js';
-import { getConversation, addMessage } from '../../state/conversation.js';
+import { getConversation, addMessage, removeMessage } from '../../state/conversation.js';
 import { recentHoldingBeats } from '../../state/holdingBeats.js';
 import { getEngineBackend } from '../ops/engineBackend.js';
 import { pendingIntroWeave } from '../ops/firstMove.js';
@@ -459,7 +459,9 @@ export async function chat(
   const repliedTo = chatContext?.repliedTo ?? (chatContext?.repliedToText ? { kind: 'assistant' as const, text: chatContext.repliedToText } : undefined);
   if (textToSend) textToSend = annotateTappedReply(textToSend, repliedTo, userTz);
 
-  if (textToSend) await addMessage(chatId, 'user', textToSend, chatContext?.senderHandle);
+  const userRow = textToSend
+    ? { content: textToSend, at: await addMessage(chatId, 'user', textToSend, chatContext?.senderHandle) }
+    : null;
 
   // The list itself — order included — lives in tools.ts (convoToolList); the flags are read HERE so
   // that function stays pure and testable.
@@ -890,6 +892,8 @@ export async function chat(
     toolsViaJson: true,  // tools are WRITTEN into that envelope (tool_calls), never sent natively
     messages: turnMessages,
     trace: { chatId, handle, label: 'convo' },
+    // A newer text from the same sender aborts the draft while it is still only being written.
+    signal: chatContext?.supersede?.signal,
   };
 
   try {
@@ -911,6 +915,11 @@ export async function chat(
       early?.end();
       await early?.settled();
     }
+    // The commit point: from here the draft is acted on (tools, records, bubbles). A turn replaced
+    // while it was writing stops here instead, whatever the call returned — the envelope retry
+    // swallows its own abort and hands back the first draft.
+    const supersede = chatContext?.supersede;
+    if (supersede && !supersede.commit()) throw supersede.signal.reason;
     // A streamed reply the lane could not finish (it broke, or the call ran out of time, after text
     // had started to arrive) comes back as a partial with stopReason 'error' rather than a throw
     // (llm/types.ts LlmResult.emitted). What happens to it depends on whether any of it went out.
@@ -1021,6 +1030,12 @@ export async function chat(
     if (handle && hasMedia(media)) void rememberMedia(handle, chatId, media);
     return result;
   } catch (error) {
+    // Replaced by a newer text: nothing of this reply happened, so the user row written above goes
+    // too. The next turn writes the whole burst as one row.
+    if (chatContext?.supersede?.signal.aborted) {
+      if (userRow) await removeMessage(chatId, 'user', userRow.content, userRow.at);
+      throw error;
+    }
     console.error('[convo] API error:', error);
     throw error;
   }

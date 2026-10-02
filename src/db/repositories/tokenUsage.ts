@@ -15,7 +15,7 @@ export interface TokenUsageRow {
   latencyMs?: number;
   /** The PRIMARY provider when this call was served by the fallback lane. */
   fallbackFrom?: string;
-  status?: 'ok' | 'error';
+  status?: 'ok' | 'error' | 'aborted';
   /** Capped error message when status='error'. */
   error?: string;
   /** The provider's raw stop/finish reason, verbatim ('end_turn' | 'max_tokens' | 'length' | …). */

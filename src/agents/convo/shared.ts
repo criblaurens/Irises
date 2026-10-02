@@ -132,6 +132,7 @@ import { emptyMedia, hasMedia, type IncomingMedia } from '../../webhook/types.js
 import type { LlmRequest, LlmResult, LlmMessage, LlmToolCall, LlmToolDef } from '../../llm/types.js';
 import type { OpsTask, TaskKind, PendingClarification } from '../types.js';
 import type { ResolvedReply } from '../../state/replyResolution.js';
+import type { TurnSupersede } from '../../state/liveTurn.js';
 
 // ── Shared Convo types & logic ──────────────────────────────────────────────
 // The front-line chat surface (voice, tools, tool-result handling) lives here for the Convo agent
@@ -175,6 +176,10 @@ export interface ChatContext {
    *  (`shown`, '' when every piece cleaned to nothing) and, when a piece failed to send, the `error`,
    *  so the turn records the pieces that did go out and sends nothing more early. */
   earlySend?: (sentence: string, isFirst: boolean) => Promise<{ shown: string; error?: unknown }>;
+  /** The live turn a newer text from the same sender may still replace (state/liveTurn.ts). Its
+   *  signal rides the draft call; `chat()` commits once the draft is back, and on a replaced turn
+   *  takes back the user row it wrote and throws. Absent means the turn always runs to the end. */
+  supersede?: TurnSupersede;
 }
 
 /** True when the user tapped reply on any earlier message this turn (any resolution kind, incl. the

@@ -125,6 +125,20 @@ export async function addMessage(
 }
 
 /**
+ * Take back one row addMessage wrote, matched on everything that identifies it (addMessage returned
+ * `at`). For a turn that never happened: a reply replaced by a newer text before any of it was real
+ * (state/liveTurn.ts). Not archived — nothing was said. Best-effort like every other repository call.
+ */
+export async function removeMessage(chatId: string, role: 'user' | 'assistant', content: string, at: number): Promise<void> {
+  try {
+    stmt('DELETE FROM messages WHERE chat_id = ? AND role = ? AND content = ? AND created_at = ?')
+      .run(chatId, role, content, at);
+  } catch (error) {
+    logDbError('removeMessage', error);
+  }
+}
+
+/**
  * Hard-delete messages older than `cutoffMs` (optionally in one chat), archiving each one
  * first. Both prune paths — the daily retention sweep and addMessage's inline
  * keep-it-bounded prune — call this, so conversation history always leaves a searchable trace.

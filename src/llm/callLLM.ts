@@ -820,9 +820,12 @@ function recordLlmError(req: LlmRequest, provider: LlmProvider, err: unknown, st
     system: req.system, messages: req.messages, response: `ERROR: ${message}`,
     latencyMs: Date.now() - start,
   });
+  // The caller cancelled it (a reply replaced by a newer text, an engine stop): not a failure, so no
+  // error report, and the ledger keeps it apart from the calls whose latency and errors it measures.
+  const cancelled = !!req.signal?.aborted;
   // trace:false — the ERROR llm record above is already this turn's error event; a mirror here
   // would double-count it in error_count.
-  reportError({
+  if (!cancelled) reportError({
     source: req.role, category: 'llm_error', err,
     chatId: req.trace?.chatId, handle: req.trace?.handle, taskId: req.trace?.taskId,
     detail: { provider, model, label: req.trace?.label, maxTokensSent },
@@ -832,7 +835,7 @@ function recordLlmError(req: LlmRequest, provider: LlmProvider, err: unknown, st
     handle: req.trace?.handle, chatId: req.trace?.chatId, taskId: req.trace?.taskId,
     role: req.role, label: req.trace?.label,
     provider, model,
-    latencyMs: Date.now() - start, status: 'error', error: message,
+    latencyMs: Date.now() - start, status: cancelled ? 'aborted' : 'error', error: message,
     maxTokensSent,
   }).catch(() => { /* swallow: never surface analytics failures */ });
 }
