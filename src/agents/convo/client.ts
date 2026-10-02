@@ -9,7 +9,7 @@ import { buildContextBlockWithHot } from '../../memory/dossier.js';
 import { memoryRelevanceEnabled, shortEntryLabel, threadHit } from '../../memory/relevance.js';
 import { renderedTurnFocusHits, type TurnFocusHit, type TurnFocusInput } from './turnFocus.js';
 import { getActiveOps, getRecentlyEndedOps } from '../../state/opsCoordination.js';
-import { getConversation, addMessage, removeMessage } from '../../state/conversation.js';
+import { getConversation, addMessage } from '../../state/conversation.js';
 import { recentHoldingBeats } from '../../state/holdingBeats.js';
 import { getEngineBackend } from '../ops/engineBackend.js';
 import { pendingIntroWeave } from '../ops/firstMove.js';
@@ -459,9 +459,7 @@ export async function chat(
   const repliedTo = chatContext?.repliedTo ?? (chatContext?.repliedToText ? { kind: 'assistant' as const, text: chatContext.repliedToText } : undefined);
   if (textToSend) textToSend = annotateTappedReply(textToSend, repliedTo, userTz);
 
-  const userRow = textToSend
-    ? { content: textToSend, at: await addMessage(chatId, 'user', textToSend, chatContext?.senderHandle) }
-    : null;
+  if (textToSend) chatContext?.supersede?.noteRow('user', textToSend, await addMessage(chatId, 'user', textToSend, chatContext?.senderHandle));
 
   // The list itself — order included — lives in tools.ts (convoToolList); the flags are read HERE so
   // that function stays pure and testable.
@@ -915,11 +913,9 @@ export async function chat(
       early?.end();
       await early?.settled();
     }
-    // The commit point: from here the draft is acted on (tools, records, bubbles). A turn replaced
-    // while it was writing stops here instead, whatever the call returned — the envelope retry
-    // swallows its own abort and hands back the first draft.
-    const supersede = chatContext?.supersede;
-    if (supersede && !supersede.commit()) throw supersede.signal.reason;
+    // A turn replaced while it was writing stops here, whatever the call returned: the envelope
+    // retry swallows its own abort and hands back the first draft.
+    if (chatContext?.supersede?.signal.aborted) throw chatContext.supersede.signal.reason;
     // A streamed reply the lane could not finish (it broke, or the call ran out of time, after text
     // had started to arrive) comes back as a partial with stopReason 'error' rather than a throw
     // (llm/types.ts LlmResult.emitted). What happens to it depends on whether any of it went out.
@@ -947,13 +943,19 @@ export async function chat(
       }
     }
     const onScreen = early?.sent ?? [];
+    // Every pass after the draft is a model call of the same turn, so a newer text aborts it too.
+    const passBase = onScreen.length ? withOnScreenNote(call ?? callConvoLLM, onScreen) : call;
+    const turnSignal = chatContext?.supersede?.signal;
+    const passCall: typeof call = turnSignal
+      ? (req, stream) => (passBase ?? callConvoLLM)({ ...req, signal: turnSignal }, stream)
+      : passBase;
     const result = await processConvoResult({
       res, chatId, handle, chatContext, textToSend, typedText, history, media,
       // A pass that replaces the draft after part of it went out is told what is on their screen:
       // every such pass calls through `turn.call`, so it is wrapped here, once.
       turn: {
         system, messages: turnMessages, tools,
-        call: onScreen.length ? withOnScreenNote(call ?? callConvoLLM, onScreen) : call,
+        call: passCall,
         cacheBreakpoints: prompt.cacheBreakpoints,
       },
       emittedPrefix: onScreen,
@@ -1030,12 +1032,8 @@ export async function chat(
     if (handle && hasMedia(media)) void rememberMedia(handle, chatId, media);
     return result;
   } catch (error) {
-    // Replaced by a newer text: nothing of this reply happened, so the user row written above goes
-    // too. The next turn writes the whole burst as one row.
-    if (chatContext?.supersede?.signal.aborted) {
-      if (userRow) await removeMessage(chatId, 'user', userRow.content, userRow.at);
-      throw error;
-    }
+    // Replaced by a newer text: not a failure. The send boundary takes back this turn's rows.
+    if (chatContext?.supersede?.signal.aborted) throw error;
     console.error('[convo] API error:', error);
     throw error;
   }

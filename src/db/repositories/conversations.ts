@@ -127,7 +127,7 @@ export async function addMessage(
 /**
  * Take back one row addMessage wrote, matched on everything that identifies it (addMessage returned
  * `at`). For a turn that never happened: a reply replaced by a newer text before any of it was real
- * (state/liveTurn.ts). Not archived — nothing was said. Best-effort like every other repository call.
+ * (state/liveTurn.ts), or a stopped one nothing of which went out. Not archived — nothing was said. Best-effort like every other repository call.
  */
 export async function removeMessage(chatId: string, role: 'user' | 'assistant', content: string, at: number): Promise<void> {
   try {
@@ -135,6 +135,17 @@ export async function removeMessage(chatId: string, role: 'user' | 'assistant', 
       .run(chatId, role, content, at);
   } catch (error) {
     logDbError('removeMessage', error);
+  }
+}
+
+/** Rewrite one row addMessage wrote, matched the same way: a reply cut short by a newer text keeps
+ *  only what reached their screen (state/liveTurn.ts). Best-effort. */
+export async function replaceMessage(chatId: string, role: 'user' | 'assistant', content: string, at: number, next: string): Promise<void> {
+  try {
+    stmt('UPDATE messages SET content = ? WHERE chat_id = ? AND role = ? AND content = ? AND created_at = ?')
+      .run(next, chatId, role, content, at);
+  } catch (error) {
+    logDbError('replaceMessage', error);
   }
 }
 

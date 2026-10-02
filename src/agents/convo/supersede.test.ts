@@ -1,7 +1,8 @@
 // A reply replaced by a newer text, through the front door (convo/client.ts `chat`): the model faked
 // at the lane seam, nothing else stubbed. Pinned: the draft call carries the live turn's signal, a
-// replaced turn throws instead of acting on its draft (even one the call managed to return), and the
-// user row it wrote is taken back so the next turn records the burst once.
+// replaced turn throws instead of acting on its draft (even one the call managed to return), every
+// history row it wrote is noted on the turn for the send boundary to take back, and a tool that acts
+// on the world commits the turn so a newer text can only stop what has not gone out.
 
 process.env.DATA_BACKEND = 'memory';
 
@@ -11,7 +12,6 @@ import { randomUUID } from 'node:crypto';
 import { chat } from './client.js';
 import type { ChatContext } from './shared.js';
 import { emptyMedia } from '../../webhook/types.js';
-import { getConversation } from '../../state/conversation.js';
 import { __resetOpsCoordination } from '../../state/opsCoordination.js';
 import { LiveTurn, TurnSupersededError } from '../../state/liveTurn.js';
 import type { LlmRequest, LlmResult } from '../../llm/types.js';
@@ -41,7 +41,7 @@ test('a newer text aborts the draft call, and the turn leaves no trace in histor
 
   await assert.rejects(chat(chatId, 'wait actually', emptyMedia(), ctx(turn), call), TurnSupersededError);
   assert.equal(seen, turn.signal, 'the draft call carries the live turn signal');
-  assert.deepEqual(await getConversation(chatId), [], 'the user row was taken back');
+  assert.deepEqual(turn.rows.map(r => r.role), ['user'], 'the user row is noted for the send boundary to take back');
 });
 
 test('a draft that came back after the turn was replaced is not acted on', async () => {
@@ -54,10 +54,10 @@ test('a draft that came back after the turn was replaced is not acted on', async
   };
 
   await assert.rejects(chat(chatId, 'wait actually', emptyMedia(), ctx(turn), call), TurnSupersededError);
-  assert.deepEqual(await getConversation(chatId), [], 'no user row, no assistant row');
+  assert.deepEqual(turn.rows.map(r => r.role), ['user'], 'no assistant row was written');
 });
 
-test('a turn nobody interrupted commits and answers as usual', async () => {
+test('a reply that is only words stays replaceable until it reaches their screen', async () => {
   const chatId = randomUUID();
   const turn = new LiveTurn('+1');
   turn.arm();
@@ -65,6 +65,24 @@ test('a turn nobody interrupted commits and answers as usual', async () => {
 
   const out = await chat(chatId, 'wait actually', emptyMedia(), ctx(turn), call);
   assert.match(out.text ?? '', /lol yeah/);
-  assert.equal(turn.supersedeBy('+1'), false, 'committed: a later text is the next turn');
-  assert.deepEqual((await getConversation(chatId)).map(m => m.role), ['user', 'assistant']);
+  assert.deepEqual(turn.rows.map(r => r.role), ['user', 'assistant'], 'both rows noted');
+  assert.equal(turn.supersedeBy('+1'), 'replaced', 'nothing went out yet: a newer text still replaces it');
+});
+
+test('a tool that acts on the world commits the turn: a newer text then only stops it', async () => {
+  const chatId = randomUUID();
+  const turn = new LiveTurn('+1');
+  turn.arm();
+  const envelope = JSON.stringify({
+    confidence_level: 90,
+    tool_calls: [{ name: 'set_preference', args: { key: 'comms_style', value: 'short texts' } }],
+    bubbles: [{ text: 'got it', re: null }],
+    status: {},
+  });
+  const toolCalls = [{ id: 't1', name: 'set_preference', input: { key: 'comms_style', value: 'short texts' } }];
+  const call = async (): Promise<LlmResult> => ({ text: envelope, toolCalls, stopReason: 'end_turn', provider: 'openrouter', model: 'test' });
+
+  await chat(chatId, 'keep it short pls', emptyMedia(), ctx(turn), call);
+  assert.equal(turn.supersedeBy('+1'), 'stopped');
+  assert.equal(turn.signal.aborted, false);
 });

@@ -7,6 +7,7 @@ export {
   getConversation,
   addMessage,
   removeMessage,
+  replaceMessage,
   clearConversation,
   hasHistory,
 } from '../db/repositories/conversations.js';

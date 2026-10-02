@@ -12,7 +12,7 @@ import { webChannel } from './channels/web/channel.js';
 import { createWebRouter } from './channels/web/routes.js';
 import type { MediaAttachment } from './channels/types.js';
 import * as convoClient from './agents/convo/client.js';
-import { getUserProfile, addMessage, hasHistory } from './state/conversation.js';
+import { getUserProfile, addMessage, hasHistory, removeMessage, replaceMessage } from './state/conversation.js';
 import { runOpsAndFollowUp } from './agents/orchestrator.js';
 import { ensureEngineOnboarded } from './agents/ops/engineOnboarding.js';
 import { initFirstMove } from './agents/ops/firstMove.js';
@@ -37,7 +37,7 @@ import { createOpsTaskRecovery, opsDurableTasksEnabled } from './state/opsTaskDu
 import { estimateOpsEta } from './agents/etaEstimate.js';
 import { browserLegBudgetFor } from './agents/ops/client.js';
 import { withChatLock } from './state/sendQueue.js';
-import { LiveTurn } from './state/liveTurn.js';
+import { LiveTurn, TurnSupersededError } from './state/liveTurn.js';
 import { createMouth, type SpeakContent, type SpeakOpts, type SpeakResult } from './state/mouth.js';
 import { registerPendingInboundProvider } from './state/inboundGlance.js';
 import { isTypingFresh as isTypingFreshAt, shouldFlush, effectiveSettleMs } from './state/batchTiming.js';
@@ -320,6 +320,18 @@ async function waitForUserQuiet(chatId: string) {
   } while (isTypingFresh(chatId));
 }
 
+/** A stopped reply's history rows, cut to the bubbles that reached their screen (`shown`), and gone
+ *  when nothing at all did. Their own message stays: the next turn reads it, unanswered, beside the
+ *  newer one. A tapback that went out with no bubble after it keeps its row as written. */
+async function settleStoppedRows(chatId: string, turn: LiveTurn, shown: string[], showedAny: boolean): Promise<void> {
+  const rows = turn.rows.filter(r => r.role === 'assistant');
+  if (showedAny && !shown.length) return;
+  for (const [i, row] of rows.entries()) {
+    if (i === 0 && shown.length) await replaceMessage(chatId, row.role, row.content, row.at, shown.join(' '));
+    else await removeMessage(chatId, row.role, row.content, row.at);
+  }
+}
+
 async function processPendingChat(chatId: string) {
   const pending = pendingChats.get(chatId);
   if (!pending || pending.isProcessing) return;
@@ -382,10 +394,11 @@ async function processPendingChat(chatId: string) {
         );
       } catch (error) {
         if (turn.signal.aborted) {
-          // A newer text replaced this reply before any of it was real. Back to the front of the
-          // queue, this run (drained lates included) then the runs after it, ahead of the new text,
-          // to be answered once as the burst it is.
+          // A newer text replaced this reply before any of it reached them. Its history rows go, and
+          // the run goes back to the front of the queue (drained lates included, then the runs after
+          // it), ahead of the new text, to be answered once as the burst it is.
           console.log(`[main] newer message landed while the reply was being written — answering the whole burst instead (chat ${chatId})`);
+          for (const row of turn.rows) await removeMessage(chatId, row.role, row.content, row.at);
           superseded = true;
           pending.messages.unshift(...run, ...messagesToProcess.filter(m => !run.includes(m)));
           messagesToProcess.length = 0;
@@ -402,6 +415,7 @@ async function processPendingChat(chatId: string) {
           ...(answeredInPart ? { detail: { answeredInPart } } : {}),
         });
       } finally {
+        if (turn.stopped) superseded = true;
         if (pending.turn === turn) pending.turn = null;
         // This run's texts (including drained lates — same object identities) are recorded now:
         // stop advertising them to the pending-inbound glance while later runs process.
@@ -417,9 +431,9 @@ async function processPendingChat(chatId: string) {
   } finally {
     pending.isProcessing = false;
     pending.inFlightBatch = null;
-    // Messages that arrived while we were processing become the next batch. A replaced reply's burst
-    // goes as soon as the newest text's own settle window closes (onTick measures it from that text),
-    // with the classifiers warmed for the burst as it now stands.
+    // Messages that arrived while we were processing become the next batch. After a replaced or
+    // stopped reply it goes as soon as the newest text's own settle window closes (onTick measures it
+    // from that text), with the classifiers warmed for the burst as it now stands.
     if (superseded) {
       warmBurst(chatId, pending);
       scheduleTick(chatId, 0);
@@ -458,6 +472,7 @@ interface SendBubbleOpts {
   targets?: (ReplyTo | undefined)[]; // per-bubble native-reply targets, aligned by bubble index (overrides replyToFirst)
   record?: boolean;               // append the joined text to history (default true)
   paced?: boolean;                // simulate typing between bubbles (default true). false = send now (critical alerts)
+  mayShow?: () => boolean;        // asked right before each bubble goes out; false drops it and the rest (state/liveTurn.ts)
 }
 
 // Simulated typing time for a bubble — pure math in state/pacing.ts (floor/cap/jitter, plus the
@@ -536,8 +551,8 @@ function prepareBubble(raw: string): string {
 async function sendOneBubble(
   chatId: string,
   text: string,
-  opts: { isFirst: boolean; isLast: boolean; replyTo?: ReplyTo; paced?: boolean; typingVisible?: boolean },
-): Promise<void> {
+  opts: { isFirst: boolean; isLast: boolean; replyTo?: ReplyTo; paced?: boolean; typingVisible?: boolean; mayShow?: () => boolean },
+): Promise<boolean> {
   const { isFirst, isLast, replyTo } = opts;
   const paced = opts.paced !== false;
   const typingVisible = opts.typingVisible ?? resolveChannel(chatId).caps.typing;
@@ -554,6 +569,8 @@ async function sendOneBubble(
     // gap so a multi-bubble reply still reads as separate sends rather than one wall of text.
     await sleep(BRIDGE_BUBBLE_GAP_MS);
   }
+  // The bubble's last moment to be dropped, after its typing beat: they may have texted again.
+  if (opts.mayShow && !opts.mayShow()) return false;
   const sent = await sendMessage(chatId, text, replyTo);
   // Remember this bubble by its channel message id so a later inbound reply_to can be resolved
   // back to what Irises said. `replyTo?.message_id` is the anchor this bubble was threaded to (an
@@ -566,6 +583,7 @@ async function sendOneBubble(
   // send would read as "still typing" with nothing behind it. Fire-and-forget: startTyping swallows
   // its own errors, and the next bubble's hold re-pings anyway. Only meaningful where dots show.
   if (paced && typingVisible && !isLast) void startTyping(chatId);
+  return true;
 }
 
 /**
@@ -605,9 +623,16 @@ async function sendBubbles(chatId: string, rawBubbles: string[], opts: SendBubbl
   // while we "type". On one that doesn't, the same hold is pure DEAD AIR: an unexplained gap with no
   // dots. There we drop the hold and only space multi-bubble replies by a small gap.
   const typingVisible = resolveChannel(chatId).caps.typing;
+  let shown = 0;
   for (let i = 0; i < prepared.length; i++) {
     const { text, replyTo } = prepared[i];
-    await sendOneBubble(chatId, text, { isFirst: i === 0, isLast: i === prepared.length - 1, replyTo, paced, typingVisible });
+    if (!await sendOneBubble(chatId, text, { isFirst: i === 0, isLast: i === prepared.length - 1, replyTo, paced, typingVisible, mayShow: opts.mayShow })) break;
+    shown++;
+  }
+  // Dropped before its first bubble: nothing was delivered, so there is nothing to close or log.
+  if (shown === 0) {
+    if (typingVisible) releaseTyping(chatId);
+    return 0;
   }
   // The reply is fully out, so put the dots down EXPLICITLY. This used to be left implicit on the
   // theory that "sending a message clears the recipient's typing dots" — true on the web channel,
@@ -622,11 +647,11 @@ async function sendBubbles(chatId: string, rawBubbles: string[], opts: SendBubbl
   // after these bubbles is treated as "gapped" and gets a quote, and so a queued message that predates
   // this send is flagged stale to the next turn's prompt (outboundLog.countSendsSince).
   noteSend(chatId);
-  if (opts.record !== false) await addMessage(chatId, 'assistant', prepared.map(p => p.text).join(' '));
-  // How many bubbles actually went out. Zero means every one cleaned to nothing and this returned
-  // before the dots came down or the delivery was logged, which a caller closing a delivery it
-  // started elsewhere (the early sink) has to know.
-  return prepared.length;
+  if (opts.record !== false) await addMessage(chatId, 'assistant', prepared.slice(0, shown).map(p => p.text).join(' '));
+  // How many bubbles actually went out. Zero means every one cleaned to nothing (or was dropped) and
+  // this returned before the delivery was logged, which a caller closing a delivery it started
+  // elsewhere (the early sink) has to know.
+  return shown;
 }
 
 /**
@@ -834,11 +859,17 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
     ? { message_id: messageId }
     : undefined;
   const sentEarly: string[] = [];
+  // Asked right before anything of this reply reaches their screen (state/liveTurn.ts): false once a
+  // newer text from them replaced or stopped it, and then that thing is dropped.
+  let showedAny = false;
+  const mayShow = () => {
+    const ok = !turn || turn.show();
+    if (ok) showedAny = true;
+    return ok;
+  };
   // It reports what of the sentence actually went out rather than throwing, so a send that fails on
   // its second piece still leaves the first one in the turn's record.
   const earlySend = async (sentence: string): Promise<{ shown: string; error?: unknown }> => {
-    // A bubble on their screen is the reply becoming real: no newer text replaces it after this.
-    if (turn && !turn.commit()) return { shown: '', error: turn.signal.reason };
     const shown: string[] = [];
     try {
       for (const piece of splitIntoBubbles(sentence)) {
@@ -847,7 +878,10 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
         // First means first on their screen, which only this side knows: `chat()`'s own `isFirst` is
         // the same thing whenever the first sentence's pieces all survive the guardrail.
         const first = sentEarly.length === 0;
-        await sendOneBubble(chatId, bubble, { isFirst: first, isLast: false, replyTo: first ? earlyAnchor : undefined });
+        // Dropped because they texted again: reported like a failed send, so nothing more goes early.
+        if (!await sendOneBubble(chatId, bubble, { isFirst: first, isLast: false, replyTo: first ? earlyAnchor : undefined, mayShow })) {
+          return { shown: shown.join(' '), error: turn?.signal.reason ?? new TurnSupersededError() };
+        }
         sentEarly.push(bubble);
         shown.push(bubble);
       }
@@ -891,20 +925,23 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
     supersede: turn,
   }).catch(closeEarlyOnFailure);
   turnOut = out;
+  // Replaced while the reply was still being worked out: processPendingChat takes back its rows and
+  // answers the burst again, with the newer text in it.
+  if (turn?.signal.aborted) throw turn.signal.reason;
   const { text: responseText, reaction, renameChat, rememberedUser, generatedImage, groupChatIcon, removeMember, delegatedTask, hardCapped, turnTrace, unsend } = out;
   console.log(`[timing] agent: ${Date.now() - start}ms`);
   console.log(`[debug] responseText: ${responseText ? `"${responseText.substring(0, 50)}..."` : 'null'}, renameChat: ${renameChat || 'null'}, generatedImage: ${generatedImage ? 'yes' : 'null'}, removeMember: ${removeMember || 'null'}`);
   // Send reaction if agent wants to. On a burst the model may target a specific [msg N] via `re` (e.g.
   // tapback the one message a later send already answered); resolveReactionTarget maps it to that id,
   // falling back to the latest message when there's no valid target.
-  if (reaction) {
+  if (reaction && mayShow()) {
     await sendReaction(chatId, resolveReactionTarget(reaction.re, incomingMessageIds, messageId), reaction);
     console.log(`[timing] reaction: ${Date.now() - start}ms`);
   }
 
   // Take back one bubble of her previous reply before this reply's bubbles go out. Either way it
   // lands in her history, so she knows whether they can still see it.
-  if (unsend) {
+  if (unsend && mayShow()) {
     const outcome = await executeUnsend(chatId, unsend, unsendMessage);
     if (outcome.status === 'invalid') console.warn(`[main] unsend: bubble ${unsend.bubble} was not on offer (chat ${chatId})`);
     else {
@@ -917,13 +954,13 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
   }
 
   // Rename group chat if agent wants to
-  if (renameChat && isGroupChat) {
+  if (renameChat && isGroupChat && mayShow()) {
     await renameGroupChat(chatId, renameChat);
     console.log(`[timing] renameChat: ${Date.now() - start}ms`);
   }
 
   // Remove member from group chat if agent wants to
-  if (removeMember && isGroupChat) {
+  if (removeMember && isGroupChat && mayShow()) {
     try {
       await removeParticipant(chatId, removeMember);
       console.log(`[timing] removeMember: ${Date.now() - start}ms`);
@@ -964,6 +1001,8 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
   let bubbleReport = buildBubbleReport([], { hardCapped: false, splits: 0 });
   // Whether bubbles went out early and nothing has closed that delivery yet (see after the block).
   let earlyDeliveryOpen = sentEarly.length > 0;
+  // The reply's bubbles that went out after the early ones (all of them on a turn with none early).
+  let shownLater: string[] = [];
 
   if (finalText || generatedImage || groupChatIcon) {
     // Split into bubbles, strip the routing tags, and compute each bubble's native-reply target.
@@ -1006,20 +1045,24 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
     if (remainder) {
       // Only the rest, unthreaded: the one bubble a single message's reply anchors is the first, and
       // that one already went. sendBubbles puts the dots down and logs the delivery after its last.
-      if (remainder.rest.length > 0 && await sendBubbles(chatId, remainder.rest, { record: false }) > 0) {
-        earlyDeliveryOpen = false;
+      if (remainder.rest.length > 0) {
+        const n = await sendBubbles(chatId, remainder.rest, { record: false, mayShow });
+        shownLater = remainder.rest.map(prepareBubble).filter(Boolean).slice(0, n);
+        if (n > 0) earlyDeliveryOpen = false;
       }
       console.log(`[timing] sendMessage (${sentEarly.length} early + ${remainder.rest.length} after): ${Date.now() - start}ms`);
     } else if (bubbles.length > 0) {
-      await sendBubbles(chatId, bubbles, {
+      const n = await sendBubbles(chatId, bubbles, {
         targets,
         record: false,
+        mayShow,
       });
+      shownLater = bubbles.map(prepareBubble).filter(Boolean).slice(0, n);
       console.log(`[timing] sendMessage (${bubbles.length} text msg${bubbles.length !== 1 ? 's' : ''}): ${Date.now() - start}ms`);
     }
 
     // Now generate and send image if requested
-    if (generatedImage) {
+    if (generatedImage && mayShow()) {
       await startTyping(chatId);
       console.log(`[main] Generating image after sending text...`);
       const imageUrl = await agentClient.generateImage(generatedImage.prompt);
@@ -1040,7 +1083,7 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
     }
 
     // Generate and set group chat icon if requested
-    if (groupChatIcon && isGroupChat) {
+    if (groupChatIcon && isGroupChat && mayShow()) {
       await startTyping(chatId);
       console.log(`[main] Generating group chat icon...`);
       const imageUrl = await agentClient.generateImage(groupChatIcon.prompt);
@@ -1061,6 +1104,16 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
     console.log(`[timing] total: ${Date.now() - start}ms (${extras || 'text only'})`);
   } else if (reaction) {
     console.log(`[main] Reaction-only response (saved to history for context)`);
+  }
+
+  // Replaced before anything reached them (nothing could show once it was): answer the burst again.
+  if (turn?.signal.aborted) throw turn.signal.reason;
+  // Stopped by a newer text after it committed: their screen holds only what went out, so the history
+  // row says exactly that, and a reply nothing of which went out leaves no row at all.
+  const stoppedBare = !!turn?.stopped && !showedAny;
+  if (turn?.stopped) {
+    await settleStoppedRows(chatId, turn, [...sentEarly, ...shownLater], showedAny);
+    console.log(`[main] newer message landed mid-reply — dropped what had not gone out (${sentEarly.length + shownLater.length} bubble(s) shown, chat ${chatId})`);
   }
 
   // A reply that went out early and left nothing after it never reached sendBubbles, which is what
@@ -1101,7 +1154,9 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
   // (cancel_research) reaches the running loop. The follow-up arrives via sendFollowUp, which
   // re-acquires the mouth and VOICES under it. A media_read task goes to MM (silent run), everything
   // else to Ops (progress-pinged).
-  if (delegatedTask) {
+  // A delegation whose holding line never reached them is left to the next turn, which reads their
+  // ask unanswered in history and decides again with the newer text in front of it.
+  if (delegatedTask && !stoppedBare) {
     if (isGroupChat) delegatedTask.room = true;
     opsCancel = new AbortController();
     // The estimate is chosen ONCE here and read by every later ping (opsCoordination), so it takes

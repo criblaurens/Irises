@@ -3314,12 +3314,24 @@ function alreadyCancelled(r: ActionResult, effects: TurnEffects, match: string):
  * canonical order (convo/toolOrder.ts: cancels, then updates, then creates), and each writes what it
  * did into `effects`; what only a second pass can answer comes back as the pass's captures.
  */
+/** Tools that change something the moment they are dispatched. The rest only read, or hand their
+ *  effect to the send boundary (a tapback, an unsend, a rename) or to the end of the turn (a delegation). */
+const ACTING_TOOLS: ReadonlySet<string> = new Set([
+  'schedule_automation', 'update_automation', 'cancel_automation', 'cancel_research', 'steer_research',
+  'remember_user', 'set_preference', 'update_memory', 'update_directives',
+]);
+
 async function dispatchToolCalls(calls: LlmToolCall[], effects: TurnEffects, ctx: DispatchContext): Promise<PassCaptures> {
   const { chatId, handle, chatContext, textToSend, media } = ctx;
   const captures: PassCaptures = { recallQuery: null, errorLogLimit: null };
 
   for (const call of calls) {
     const input = call.input;
+    // A tool that acts on the world commits the turn: a newer text can no longer take it back, only
+    // stop what has not reached their screen. A turn already replaced acts on nothing.
+    if (ACTING_TOOLS.has(call.name) && chatContext?.supersede && !chatContext.supersede.commit()) {
+      throw chatContext.supersede.signal.reason;
+    }
     effects.dispatched.push(toolCallKey(call));
     if (call.name === 'send_reaction') {
       const re = coerceReactionIndex(input.re);
@@ -4915,6 +4927,7 @@ export async function processConvoResult(args: {
   if (cleanForRecord) {
     const historyMessage = cleanForRecord.split(/(?:---|[\r\n]+)/).map(m => m.trim()).filter(Boolean).join(' ');
     const holdingAt = await addMessage(chatId, 'assistant', historyMessage);
+    args.chatContext?.supersede?.noteRow('assistant', historyMessage, holdingAt);
     // Stamp the holding line's canonical timestamp on the task (single-clock). The composer uses
     // it to find messages the user sends WHILE Ops runs, so the late reply can nod to them.
     if (effects.delegatedTask) effects.delegatedTask.holdingAt = holdingAt;
@@ -4929,7 +4942,8 @@ export async function processConvoResult(args: {
     if (args.introWoven) markIntroWoven();
   } else if (effects.reaction) {
     const d = effects.reaction.type === 'custom' ? (effects.reaction as { type: 'custom'; emoji: string }).emoji : effects.reaction.type;
-    await addMessage(chatId, 'assistant', `[reacted with ${d}]`);
+    const row = `[reacted with ${d}]`;
+    args.chatContext?.supersede?.noteRow('assistant', row, await addMessage(chatId, 'assistant', row));
   }
 
   // The model's hidden status for this turn, coerced ONCE. Three readers below need it — the thread
