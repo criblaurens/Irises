@@ -10,6 +10,7 @@ import { memoryRelevanceEnabled, shortEntryLabel, threadHit } from '../../memory
 import { renderedTurnFocusHits, type TurnFocusHit, type TurnFocusInput } from './turnFocus.js';
 import { getActiveOps, getRecentlyEndedOps } from '../../state/opsCoordination.js';
 import { getConversation, addMessage } from '../../state/conversation.js';
+import { TurnSupersededError } from '../../state/liveTurn.js';
 import { recentHoldingBeats } from '../../state/holdingBeats.js';
 import { getEngineBackend } from '../ops/engineBackend.js';
 import { pendingIntroWeave } from '../ops/firstMove.js';
@@ -186,7 +187,11 @@ function armEarlySend(
         } catch (err) {
           error = err ?? new Error('early send failed');
         }
-        if (error !== undefined) {
+        if (error instanceof TurnSupersededError) {
+          // They texted again: the send boundary drops the rest of this reply, so nothing more goes early.
+          failed = true;
+          disarm('superseded');
+        } else if (error !== undefined) {
           failed = true;
           disarm('send_failed');
           console.warn(`[convo] early send failed — the rest of the reply goes out whole (chat ${chatId})`, error);
