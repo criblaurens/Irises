@@ -6,6 +6,7 @@ export type { UserProfile } from '../db/repositories/profiles.js';
 export {
   getConversation,
   addMessage,
+  removeMessage,
   clearConversation,
   hasHistory,
 } from '../db/repositories/conversations.js';
