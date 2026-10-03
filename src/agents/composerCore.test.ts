@@ -20,6 +20,7 @@ import { defaultClimate, type RelationshipClimate } from '../persona/climate.js'
 import { groupHandle } from '../memory/identity.js';
 import { resetStorageForTests } from '../db/sqlite.js';
 import { getFamiliarity, saveFamiliarity } from '../db/repositories/familiarity.js';
+import { upsertFact } from '../db/repositories/memoryMedium.js';
 import type { LlmRequest, LlmResult } from '../llm/types.js';
 
 function fakeLlm(text: string, captured: LlmRequest[] = []) {
@@ -328,8 +329,8 @@ test('a relay into a room is a stranger even under the asker\'s own close row', 
 });
 
 // --- the dynamic block's own order ---------------------------------------------------------------
-// buildComposerDynamic is the pure half of the assembly above: three strings in, one <prompt> body
-// out. The shared persona block no longer rides here — it moved to the system prompt (see
+// buildComposerDynamic is the pure half of the assembly above: up to four strings in, one <prompt>
+// body out. The shared persona block no longer rides here — it moved to the system prompt (see
 // `composeWithComposer`'s `system` assembly, and the persona-in-system assertion above) — so what's
 // left to pin is the order of what still does: weather, then facts, then the memory layer.
 
@@ -344,4 +345,56 @@ test('the dynamic block is weather, facts, memory — in that order', () => {
 test('an empty weather or memory layer drops out, and the facts still lead', () => {
   const dynamic = buildComposerDynamic('', 'the deadline is march 14', '');
   assert.equal(dynamic, 'the deadline is march 14', 'no blank joins, no empty sections');
+});
+
+test('with personContext the voice window is the whole fetched history', async () => {
+  for (let i = 0; i < 12; i++) await addMessage('web:a', 'user', `m${i}`, '+1555');
+  const captured: LlmRequest[] = [];
+  await composeWithComposer({
+    ...base,
+    personContext: true,
+    buildInstruction: () => 'x',
+    llm: fakeLlm('{"bubbles":[{"text":"ok"}]}', captured),
+  });
+  assert.equal(captured[0].messages.length, 13, '12 history turns + the brief');
+  assert.equal(String(captured[0].messages[0].content), 'm0');
+});
+
+test('with personContext the medium tier about them reaches the prompt; without it, it does not', async () => {
+  const handle = '+15550001111';
+  await upsertFact(handle, 'trip', 'saving up for a trip in december');
+  const withIt: LlmRequest[] = [];
+  await composeWithComposer({
+    ...base, handle, personContext: true,
+    buildInstruction: () => 'x',
+    llm: fakeLlm('{"bubbles":[{"text":"ok"}]}', withIt),
+  });
+  assert.match(String(withIt[0].messages.at(-1)!.content), /<memory_medium>[\s\S]*saving up for a trip in december/);
+  const without: LlmRequest[] = [];
+  await composeWithComposer({
+    ...base, handle,
+    buildInstruction: () => 'x',
+    llm: fakeLlm('{"bubbles":[{"text":"ok"}]}', without),
+  });
+  assert.doesNotMatch(String(without[0].messages.at(-1)!.content), /<memory_medium>/);
+});
+
+test('an edge line sits after </prompt> and right before the format anchor, which stays last', async () => {
+  const captured: LlmRequest[] = [];
+  await composeWithComposer({
+    ...base,
+    edge: 'EDGE LINE',
+    buildInstruction: () => 'x',
+    llm: fakeLlm('{"bubbles":[{"text":"ok"}]}', captured),
+  });
+  const content = String(captured[0].messages.at(-1)!.content);
+  assert.ok(content.endsWith(`</prompt>\n\nEDGE LINE\n\n${FORMAT_ANCHOR}`), content.slice(-200));
+});
+
+test('the person block sits after the weather and before the facts', () => {
+  const dynamic = buildComposerDynamic('## Where you are right now\nweather', 'the deadline is march 14', 'how to address them: Sam', '## Your read on them\nreads');
+  const at = (needle: string) => dynamic.indexOf(needle);
+  assert.ok(at('## Where you are right now') < at('## Your read on them'));
+  assert.ok(at('## Your read on them') < at('the deadline is march 14'));
+  assert.ok(at('the deadline is march 14') < at('how to address them: Sam'));
 });
