@@ -22,6 +22,7 @@ import { resetStorageForTests } from '../db/sqlite.js';
 import { getFamiliarity, saveFamiliarity } from '../db/repositories/familiarity.js';
 import { upsertFact } from '../db/repositories/memoryMedium.js';
 import type { LlmRequest, LlmResult } from '../llm/types.js';
+import { loadContext } from './loadContext.js';
 
 function fakeLlm(text: string, captured: LlmRequest[] = []) {
   return (async (req: LlmRequest): Promise<LlmResult> => {
@@ -397,4 +398,20 @@ test('the person block sits after the weather and before the facts', () => {
   assert.ok(at('## Where you are right now') < at('## Your read on them'));
   assert.ok(at('## Your read on them') < at('the deadline is march 14'));
   assert.ok(at('the deadline is march 14') < at('how to address them: Sam'));
+});
+
+test('the composer prose carries the view section and none of the relay-only lines', () => {
+  const md = loadContext('composer');
+  assert.ok(md.includes('\n## what you make of it\n'), 'the view section exists');
+  assert.ok(md.includes('### the same move, many moments'), 'the example spread exists');
+  for (const gone of [
+    "don't brainstorm, don't spin speculative angles",
+    "don't anticipate unprompted",
+    'not your own read of what that means',
+    'a sentence is about you instead of their answer',
+    'it becomes one short offer at the end',
+  ]) assert.ok(!md.includes(gone), `relay-only line still present: ${gone}`);
+  for (const pinned of ['(just making sure)', "(couldn't get that one)"]) {
+    assert.ok(md.includes(pinned), `byte-pinned beat note missing: ${pinned}`);
+  }
 });
