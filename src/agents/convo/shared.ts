@@ -25,7 +25,7 @@ import {
   addImportantNote, addDirective, updateDirective, retractEntry,
   listMediumActive, upsertFact, MediumWriteError, type MediumEntry,
 } from '../../db/repositories/memoryMedium.js';
-import { latestShortTerm } from '../../db/repositories/memoryShort.js';
+import { latestShortTerm, listShortTerm, type ShortTermEntry } from '../../db/repositories/memoryShort.js';
 import {
   searchArchive, archiveSearchBackend, archiveScopeHasVectors, type ArchiveHit,
 } from '../../db/repositories/memoryArchive.js';
@@ -108,6 +108,7 @@ import {
   asksQuestion, detectUnbackedClaim, detectUnkeptPromise, dropClaims, MUTATING_TOOLS, renderClaimCorrection,
   renderPromiseCorrection, unkeptPromiseGuardEnabled,
 } from './unkeptPromise.js';
+import { detectStaleLook, renderStaleLookCorrection } from './staleLook.js';
 import { dropSchemaEcho } from './toolCallGuard.js';
 import { orderToolCalls, toolCallKey } from './toolOrder.js';
 import {
@@ -2491,6 +2492,61 @@ async function enforcePromiseKept(
   return { res: out, fired: true, promise: !!phrase, claim: !!claim };
 }
 
+// ── The stale-look guard ────────────────────────────────────────────────────────────────────────
+/**
+ * ONE corrective re-ask for a draft that delegates a look already delivered in this chat while their
+ * message names nothing of it (convo/staleLook.ts has the verdict and the live case). Same seam and
+ * same shape as the promise guard above: before dispatch and before any history write, so the
+ * discarded draft has no effects to undo.
+ *
+ * The retry is taken whenever it says or does anything at all, whatever it delegates: the note asks
+ * her to re-read the thread, and a re-read that still wants the same look is her call to make. Only
+ * an empty retry or a dead lane keeps the original.
+ */
+async function enforceFreshLook(
+  args: { res: LlmResult; chatId: string; handle: string | undefined; turn?: ConvoTurnContext },
+  turnText: string,
+  guard: ToolCallGuard,
+  budget?: ConvoCallBudget,
+): Promise<{ res: LlmResult; fired: boolean }> {
+  const { res, chatId, handle } = args;
+  if (!handle || !args.turn || !res.toolCalls.some(c => c.name === 'delegate_to_ops')) return { res, fired: false };
+  let delivered: ShortTermEntry[] = [];
+  try { delivered = await listShortTerm(handle, { kinds: ['ops_research'], chatId, limit: 10 }); } catch { /* best-effort */ }
+  const look = detectStaleLook(res.toolCalls, delivered, turnText);
+  if (!look) return { res, fired: false };
+  const turn = takeConvoCall(budget) ? args.turn : undefined;
+  console.warn(`[convo] reply re-ran a delivered look their message never named ("${look.entry.request}") — ${turn ? 'one corrective re-ask' : 'no re-ask on this pass'} (chat ${chatId})`);
+  let out = res;
+  let resolved: 'reasked' | 'kept_original' = 'kept_original';
+  if (turn) {
+    try {
+      const retry = guard(await (turn.call ?? callConvoLLM)({
+        role: 'convo',
+        system: turn.system,
+        systemCacheBreakpoints: turn.cacheBreakpoints ?? [convoPersonaChars()],
+        tools: turn.tools,
+        jsonBubbles: true,
+        toolsViaJson: true,
+        messages: [
+          ...turn.messages,
+          { role: 'assistant', content: res.text ?? '' },
+          { role: 'user', content: renderStaleLookCorrection(look, describeGap(Date.now() - look.entry.createdAt)) },
+        ],
+        trace: { chatId, handle, label: 'convo:stale_look_retry' },
+      }));
+      if (retry.toolCalls.length || replyBubbles(parseReply(retry.text)).length) {
+        out = retry;
+        resolved = 'reasked';
+      }
+    } catch (err) {
+      reportError({ source: 'convo', category: 'retry_exhausted', severity: 'warn', err, detail: { guard: 'stale_look' }, chatId, handle });
+    }
+  }
+  record({ type: 'event', label: 'convo:stale_look', chatId, handle, detail: { delivered: look.entry.request, request: look.request, retried: !!turn, resolved } });
+  return { res: out, fired: true };
+}
+
 /**
  * Did an EARLIER pass of this same user-visible turn make a change on their behalf? What it did is in
  * the carried effects: a mutating call that landed (a failed one changed nothing), or one of the
@@ -3994,6 +4050,12 @@ export async function processConvoResult(args: {
       // (unkeptPromise.ts BARE_CLAIM_PHRASES). No directive is a task turn: the whole lexicon.
       taskTurn: !args.hooks || args.hooks.directive.mode === 'task',
     });
+  // A delegation that re-runs a delivered look their message never named (convo/staleLook.ts). Same
+  // one-re-ask-per-turn budget: it stands down when the promise guard already fired, on the
+  // approval-settled turns, and on the outcome and recall passes, whose draft is not the first read.
+  const fresh = (guard.fired || settledTask || settledReconfirm || args.outcomePass || args.archivePass || args.quietSpent)
+    ? { res: guard.res, fired: false }
+    : await enforceFreshLook({ ...args, res: guard.res }, args.typedText ?? args.textToSend, guardToolCalls, budget);
 
   // …and the rhythm backstop beside it, on the turns the selector forced quiet. ONE corrective
   // re-ask per turn, TOTAL: the promise guard goes first and this one stands down whenever it fired,
@@ -4025,7 +4087,7 @@ export async function processConvoResult(args: {
   // The kind it reads is the DRAFT's own, coerced off the reply this guard is about to correct; the
   // turn's one canonical coercion happens further down, on whatever ends up shipping.
   const forcedQuiet = !!args.hooks && args.hooks.directive.mode === 'quiet' && hooksEnabled();
-  const quietStoodDown = forcedQuiet && (guard.fired || !!settledTask || !!settledReconfirm);
+  const quietStoodDown = forcedQuiet && (guard.fired || fresh.fired || !!settledTask || !!settledReconfirm);
   // Held, not filed — see above. Undefined on every turn the selector did not force quiet, which is
   // the great majority, and the absence of a row is what "never forced" means to the battery.
   let quietReceipt: QuietGuardDetail | undefined;
@@ -4034,7 +4096,7 @@ export async function processConvoResult(args: {
       args, replyBubbles(firstReply), coerceStatus(firstReply.statusRaw)?.hook_kind,
       { retry: !args.quietSpent && !args.outcomePass, file: d => { quietReceipt = d; }, guard: guardToolCalls, budget },
     )
-    : { res: guard.res, fired: false };
+    : { res: fresh.res, fired: false };
   // The stand-down still leaves its receipt, and this is the half that makes the kill switch
   // scorable at all. The guard reports every evaluation it makes, violation or not, precisely so a
   // battery can tell a forced-quiet turn she got right from a forced-quiet turn that never happened
@@ -4049,7 +4111,7 @@ export async function processConvoResult(args: {
   // Whether this user-visible turn's ONE corrective re-ask is gone, for any pass that follows this
   // one. Both guards count: the rule is one re-ask per turn TOTAL, honesty first. The outcome pass
   // inherits it and never sets it: neither guard calls the lane there, so nothing is spent.
-  const quietSpent = args.outcomePass ? !!args.quietSpent : !!args.quietSpent || guard.fired || quiet.fired;
+  const quietSpent = args.outcomePass ? !!args.quietSpent : !!args.quietSpent || guard.fired || fresh.fired || quiet.fired;
   // The result this turn actually processes. Whatever either backstop left standing was guarded
   // where it was judged, so this read is the idempotent last line described at the top: a kept list
   // re-read drops nothing, and a draft that came through untouched is the same object it was at the
