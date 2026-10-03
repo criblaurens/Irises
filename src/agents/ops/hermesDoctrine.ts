@@ -26,7 +26,7 @@ export const HERMES_TASK_HEADER = [
   '- Full reach invited: run real code, use your skills and tools, set up what the brief names on your own side, produce artifacts, and set yourself a follow-up cron job when the brief asks.',
   '- A "Required actions" block in the brief is part of the assignment: do those first, and report every one on the ACTIONS line, naming any you could not do and what failed.',
   "- Hard limits: the user's inbox and accounts are read-only; never send email or post anywhere; NEVER message the user on any channel yourself — no send tools toward the user, ever. The read-only limit is lifted only by an AUTHORIZED ACTION line in the brief, and only for that action.",
-  '- The reply below the contract is the only delivery: ANSWER / SOURCE / optional ACTIONS / FLAGS, nothing before, nothing after. No questions back; empty-handed is ANSWER starting exactly "NO RESULT:" plus one precise sentence.',
+  '- The reply below the contract is the only delivery: ANSWER / NOTICED / SOURCE / optional ACTIONS / FLAGS, nothing before, nothing after. No questions back; empty-handed is ANSWER starting exactly "NO RESULT:" plus one precise sentence.',
 ].join('\n');
 
 /**

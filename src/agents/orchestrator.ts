@@ -162,6 +162,14 @@ export function steerRelay(unapplied: readonly string[], moment: ComposeMoment):
   return `\n\nwhile you were looking they also added: ${said}. the look already under way could not take that in, so what came back may not cover it. never word the answer as if it does, and if it doesn't cover it, say so in one flat clause.`;
 }
 
+/**
+ * The answer moment's move, stated after the `<prompt>` block — the recency edge, where the
+ * flash-tier voice model actually acts on a rule (a view offered mid-prompt as a permission did not
+ * fire, Sept 2026). Principle only: a phrase named here gets reused verbatim, so the examples live in
+ * composer/Context.md "what you make of it". Exported for the pin test.
+ */
+export const VIEW_EDGE = "before you send: you read this before texting them about it, so it reaches them through you. the facts go out first and exactly as they came in. what you make of them rides along in your own words, inside the fact's bubble or the one right after: what kind of answer this is, what it says beyond itself, how it sits with them and with what you already think. the NOTICED line is usually where that is. say it as plainly as what came back lets you, as yours, and make it something only someone who read this one could say. it never adds a figure, date, name or claim that would need its own source. heavy news gets a plain, careful view and no joke.";
+
 async function composeFollowUp(
   result: OpsResult,
   task: OpsTask,
@@ -198,7 +206,8 @@ async function composeFollowUp(
     // Selection framing, not inventory framing: the composer gets THE QUESTION next to the result,
     // answers that, and holds the rest as one offer. "exactly as written" scopes fidelity to the
     // facts it relays — without the question here, a rich Ops pull reads as "relay all of this".
-    instruction = `here's what you came back with. what they asked: "${task.request}". answer THAT, told to them: the part that meets them leads, a couple of bubbles, not a report. anything in here that's true but beside their question, hold it — no mention of what else you hold, and never a "want me to?" question. after the answer, one line that hands the thread back if the moment earns one, or none. whatever you do relay — every number, date, name, ~ and maybe — stays exactly as written:\n\n${result.summary}`;
+    // The NOTICED line is named as the material her view is made of.
+    instruction = `here's what you came back with. what they asked: "${task.request}". answer THAT, told to them and told the way you see it: the part that meets them leads, a couple of bubbles, not a report. the NOTICED line, when it's there, is what stood out while you were in there, and your view of this is made of it. anything true but beside their question doesn't go out as a fact of its own, and it can still shape what you think. no mention of what else you hold, and never a "want me to?" question. after the answer, one line that hands the thread back if the moment earns one, or none. whatever you do relay — every number, date, name, ~ and maybe — stays exactly as written:\n\n${result.summary}`;
 
     // The read behind this look was shaky: Convo scored its comprehension of the ask below the
     // clean-delegation band when it launched. The answer is still real — but it answers Convo's
@@ -274,6 +283,10 @@ async function composeFollowUp(
       },
       holdingText: task.holdingText,
       room: task.room,
+      // A look coming back to the person who asked: she reads what Convo knows about them, and the
+      // answer moment carries her view at the edge (miss / snag / needs-info carry their own take).
+      personContext: true,
+      edge: moment === 'answer' ? VIEW_EDGE : undefined,
       trace: { chatId, handle, taskId: result.taskId, label: 'composer' },
       errorDetail: { moment },
     });
@@ -708,3 +721,6 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
 // Slim: runMmAndFollowUp is gone. Media the user texts now rides the SAME delegation seam as
 // everything else — Convo delegates with task.media attached, the engine adapter maps the files
 // (inline image blocks / fetchable URLs), and the Composer re-voices the engine's read.
+
+/** Probe/test seam (repo convention, see proactive.ts `_internal`): the follow-up composer. */
+export const _internal = { composeFollowUp };

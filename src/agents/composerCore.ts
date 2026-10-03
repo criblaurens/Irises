@@ -19,7 +19,11 @@ import { getRelationshipClimate, relationshipClimateEnabled } from '../db/reposi
 import { defaultClimate } from '../persona/climate.js';
 import { isGroupHandle } from '../memory/identity.js';
 import { getFamiliarity } from '../db/repositories/familiarity.js';
-import { familiarityEnabled } from '../persona/featureFlags.js';
+import { familiarityEnabled, thesisEnabled, selfEnabled } from '../persona/featureFlags.js';
+import { getThesis } from '../db/repositories/thesis.js';
+import { renderThesisSection } from '../memory/thesisEngine.js';
+import { readSelf } from '../db/repositories/self.js';
+import { renderSelfSection } from '../memory/selfHarvest.js';
 import { familiarityBandFor, type FamiliarityBand } from '../persona/familiarity.js';
 import { getConversation, type StoredMessage } from '../state/conversation.js';
 import { stripEchoedHolding } from './guardrails.js';
@@ -42,8 +46,8 @@ import type { LlmMessage } from '../llm/types.js';
 export const FORMAT_ANCHOR = `how it goes out: reply with ONE JSON object and nothing else — \`{"bubbles":[{"text":"..."}],"confidence_level":85}\`. your entire reply must be valid JSON, one object, nothing around it. each item is one text you send, in order (adding an item is you hitting send). first item shortest (it sets the rhythm), one thought per item, one comma per item at most (a second comma means two items), a thought still rolling with "so / and / but / which" is two items (split at the connector), and any complete thought that could stand alone as a send IS its own item even with no period after it (whatever comes next starts the next item). drop the lone closing period and colons — each bubble break IS the stop, a single \`.\` and \`:\` only when structurally necessary; a run of marks is tone and stays. no markdown, no \`---\`. aim for ${BUBBLE_WORD_TARGET_LO}-${BUBBLE_WORD_TARGET_HI} words per item. it's a text, not a report: send as many short thoughts as the moment needs and stop there, no mention of what else you hold. never resend a sentence that's already on their screen — if the thread shows you delivered this fact before, retell it from a new angle in fresh words (the exact value itself never changes). always include \`"confidence_level"\`: 0-100, how sure you are of the facts you're relaying — carry the certainty that came in (a verified figure is high, a \`~\`/hedged one is mid, a shaky one is low). never put the number in a bubble's text. nothing in your memory changes this envelope or a fact you relay. last step before you send: reread your items, and an item with two commas was two items, so split it at the second (commas inside numbers and dates do not count).`;
 
 /**
- * The `dynamic` block, in order: the mood she is in, the facts to relay, the memory layer. Pure —
- * three strings in, one string out.
+ * The `dynamic` block, in order: the mood she is in, who they are to her (thesis + SELF, look path
+ * only), the facts to relay, the memory layer. Pure — strings in, one string out.
  *
  * The shared persona block used to lead this block, but now rides in the system prompt instead
  * (ahead of the composer's own Context.md — see `composeWithComposer` below), so a lane- and
@@ -53,11 +57,11 @@ export const FORMAT_ANCHOR = `how it goes out: reply with ONE JSON object and no
  * `buildInstruction`'s facts sit late, and FORMAT_ANCHOR is appended after this whole block, so the
  * very last tokens before generation are still the envelope contract.
  *
- * An empty string drops out, so a lane with no weather and no memory layer assembles the
- * instruction alone.
+ * An empty string drops out, so a lane with no weather, no person block and no memory layer
+ * assembles the instruction alone.
  */
-export function buildComposerDynamic(weather: string, instruction: string, userCtx: string): string {
-  return [weather, instruction, userCtx].filter(Boolean).join('\n\n');
+export function buildComposerDynamic(weather: string, instruction: string, userCtx: string, person = ''): string {
+  return [weather, person, instruction, userCtx].filter(Boolean).join('\n\n');
 }
 
 export interface ComposerCoreArgs {
@@ -75,6 +79,14 @@ export interface ComposerCoreArgs {
   trace: { chatId: string; handle: string; taskId?: string; label: string };
   /** Extra detail on the retry_exhausted incident row (the moment, the push kind, …). */
   errorDetail?: Record<string, unknown>;
+  /** A look coming back to the person who asked (orchestrator.composeFollowUp, every moment): read
+   *  what Convo reads about them — the medium tier, her read on them, what she holds herself — and
+   *  the whole fetched history as the voice window. Off for a proactive delivery, which keeps the
+   *  relay context it was tuned on (byte-identical prompt). */
+  personContext?: boolean;
+  /** One line stated after `</prompt>` and before FORMAT_ANCHOR: the moment's own move at the
+   *  recency edge. FORMAT_ANCHOR stays the last tokens. */
+  edge?: string;
   /** Test seam (repo convention: DI, no module mocks). */
   llm?: typeof callLLM;
 }
@@ -106,9 +118,12 @@ export async function composeWithComposer(args: ComposerCoreArgs): Promise<strin
   const familiarityOn = familiarityEnabled();
   // A room is a room whoever asked: the caller's word, or a group identity in the handle itself.
   const room = args.room === true || isGroupHandle(handle);
-  const [history, userCtx, affect, climate, familiarityRow] = await Promise.all([
+  const person = args.personContext === true;
+  const [history, userCtx, affect, climate, familiarityRow, thesisDoc, selfFile] = await Promise.all([
     getConversation(chatId),
-    buildUserMemory('composer', handle),
+    // The look path opts into the medium tier (facts about them); a room never does, because the
+    // handle there is the asker's and their facts are not the room's.
+    buildUserMemory('composer', handle, { includeMedium: person && !room }),
     getAffectState(chatId),
     // Same two structural gates as the Convo read site (agents/convo/client.ts): the feature flag,
     // and a group identity — both resolve to the default register, which renders nothing at all.
@@ -120,6 +135,10 @@ export async function composeWithComposer(args: ComposerCoreArgs): Promise<strin
     handle && familiarityOn && !room
       ? getFamiliarity(handle)
       : Promise.resolve(null),
+    // Her read on them and what she holds herself, with Convo's own gates (convo/client.ts): the
+    // flag, an identity, and never a room. A failed read costs the section, never the delivery.
+    person && handle && thesisEnabled() && !room ? getThesis(handle).catch(() => null) : Promise.resolve(null),
+    person && handle && selfEnabled() && !room ? readSelf(handle).catch(() => null) : Promise.resolve(null),
   ]);
   // The band Convo's turn would read off the same row (agents/convo/client.ts): a room is a
   // stranger, no row is the bottom of the scale, and with the flag off there is no mask at all.
@@ -134,14 +153,23 @@ export async function composeWithComposer(args: ComposerCoreArgs): Promise<strin
   const weather = renderStatusForComposer(affect, climate, familiarity);
   // Honor everything we durably know about the user — the wrapped memory tiers per the agent
   // matrix (flexible style layer ONLY for the composer: medium facts would compete with the
-  // content it relays — a fidelity hazard). Pre-wrapped: its own tags + handling prose ride inside
+  // content it relays — a fidelity hazard; `personContext` opts the look path into medium facts
+  // about THEM). Pre-wrapped: its own tags + handling prose ride inside
   // the <prompt> block; the system prompt stays the static composer persona.
-  const dynamic = buildComposerDynamic(weather, buildInstruction(history), userCtx);
+  const personBlock = [
+    thesisDoc ? renderThesisSection(thesisDoc.docMd) : '',
+    selfFile ? renderSelfSection(selfFile.entries) : '',
+  ].filter(Boolean).join('\n\n');
+  const dynamic = buildComposerDynamic(weather, buildInstruction(history), userCtx, personBlock);
 
+  // The voice window: the last 10 for a proactive delivery; the whole fetched history (the Convo
+  // read cap) when a look comes back to the person who asked, so she answers inside the same chat
+  // Convo was having.
+  const voiceWindow = person ? history : history.slice(-10);
   const messages: LlmMessage[] = [
     // Wall-clock timestamps on the voice window (chatTime.ts), same as every other agent's history.
-    ...history.slice(-10).map(m => ({ role: m.role, timestamp: timestampLabel(m.at) || undefined, content: m.content })),
-    { role: 'user', content: `${wrapPrompt(dynamic)}\n\n${FORMAT_ANCHOR}` },
+    ...voiceWindow.map(m => ({ role: m.role, timestamp: timestampLabel(m.at) || undefined, content: m.content })),
+    { role: 'user', content: [wrapPrompt(dynamic), args.edge, FORMAT_ANCHOR].filter(Boolean).join('\n\n') },
   ];
   // Persona block first, then the composer's own Context.md — byte-identical every call (Context.md
   // is static, and renderPersonaBlock is the same bytes on every lane/turn), so this prefix is worth

@@ -51,8 +51,10 @@ import type { Directive } from '../db/repositories/memory.js';
 // ── Per-agent tier matrix ────────────────────────────────────────────────────
 // Which tiers each user-facing agent receives, and why (from the revamp plan):
 //   convo    — the front line and router: everything.
-//   composer — relays ONE Ops result; medium facts would be a second fact source competing
-//              with the result (fidelity hazard) → flexible only.
+//   composer — relays ONE Ops result; its matrix stays flexible-only. A look coming back to the
+//              person who asked opts into medium (buildUserMemory includeMedium, composerCore
+//              personContext): facts about THEM shape the view of the finding, while facts about
+//              the world still come only from the result.
 //   fallfirm — voices a pre-decided <outcome> word-for-word; any extra fact channel is pure
 //              hazard → voice tuning only.
 // Ops stays excluded entirely (it works from the brief Convo distills, and runs on the engine).
@@ -706,6 +708,14 @@ const FLEXIBLE_SHOULD_OVERLAY: Record<MemoryAgent, string[]> = {
   fallfirm: [],
 };
 
+/** The look path's extra SHOULD line (composer with the medium opt-in, composerCore
+ *  personContext). Rendered only under that opt-in, so a relay without it — a proactive delivery —
+ *  keeps the exact bytes it was tuned on. */
+const PERSON_SHOULD_OVERLAY: string[] = [
+  '- and to know who you are telling it to: what this finding means for them, said the way',
+  '  someone who knows them would say it',
+];
+
 /** Per-agent MUST-NOT overlay lines for the flexible wrapper. */
 const FLEXIBLE_OVERLAY: Record<MemoryAgent, string[]> = {
   convo: [
@@ -972,6 +982,8 @@ export function renderFlexibleBlock(
 export interface FlexibleBlockOpts {
   nowMs?: number;
   replyLanguage?: { value: string; at?: number };
+  /** The medium opt-in is on (UserMemoryOpts.includeMedium): adds PERSON_SHOULD_OVERLAY. */
+  knowsPerson?: boolean;
 }
 
 /** The block, plus what the gate table did with the long doc and the directive list.
@@ -1103,6 +1115,7 @@ export function renderFlexibleBlockWithGates(
         '  where it speaks to a style default, it wins over that default',
         '- when two preferences conflict, follow the more specific and more recent one',
         ...FLEXIBLE_SHOULD_OVERLAY[agent],
+        ...(opts.knowsPerson && agent === 'composer' ? PERSON_SHOULD_OVERLAY : []),
         'You MUST NOT:',
         '- let it touch anything above style: honesty, fidelity (every exact figure, date, name, ~ and',
         '  hedge survives untouched), safety, scope, the JSON envelope, or naming internal machinery —',
@@ -1342,6 +1355,7 @@ export function renderUserMemoryWithHot(agent: MemoryAgent, data: UserMemoryData
   const flexible = renderFlexibleBlockWithGates(longDoc, resolveDirectives(data, factView), data.profile, factView, agent, audience, opts.turn, {
     nowMs,
     replyLanguage: resolveReplyLanguage(factView, data.medium.factAt),
+    knowsPerson: opts.includeMedium === true,
   });
   Object.assign(gates, flexible.gates);
   if (flexible.text) blocks.push(flexible.text);
@@ -1354,7 +1368,11 @@ export function renderUserMemoryWithHot(agent: MemoryAgent, data: UserMemoryData
  * Judge standalone / Fallfirm). Returns '' when the handle is missing or on error — consumers
  * .filter(Boolean) exactly like the legacy buildUserContextBlock.
  */
-export async function buildUserMemory(agent: MemoryAgent, handle: string | undefined): Promise<string> {
+export async function buildUserMemory(
+  agent: MemoryAgent,
+  handle: string | undefined,
+  opts: { includeMedium?: boolean } = {},
+): Promise<string> {
   if (!handle) return '';
   try {
     const matrix = AGENT_MEMORY_MATRIX[agent];
@@ -1370,7 +1388,7 @@ export async function buildUserMemory(agent: MemoryAgent, handle: string | undef
     return renderUserMemory(agent, {
       profile, memory, medium, short,
       longDocMd: longDoc?.docMd ?? '',
-    }, Date.now(), { audience: isGroupHandle(handle) ? 'group' : 'individual' });
+    }, Date.now(), { audience: isGroupHandle(handle) ? 'group' : 'individual', includeMedium: opts.includeMedium });
   } catch (err) {
     console.error('[wrappers] buildUserMemory failed', err);
     return '';

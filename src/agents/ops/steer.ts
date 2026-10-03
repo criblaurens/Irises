@@ -66,7 +66,7 @@ export type SteerOutcome = 'accepted' | 'not_running' | 'unsupported';
  */
 export function steerPrompt(text: string): string {
   return `The user just added to this task mid-run: "${text.trim()}"\n`
-    + 'Fold it into the work you are doing now. Keep the same output contract (ANSWER / SOURCE / ACTIONS / FLAGS). '
+    + 'Fold it into the work you are doing now. Keep the same output contract (ANSWER / NOTICED / SOURCE / ACTIONS / FLAGS). '
     + 'If it arrived too late to act on, say so in FLAGS in one line rather than restarting.';
 }
 

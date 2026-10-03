@@ -26,9 +26,13 @@ export function looksLikeMiss(text: string | null | undefined): boolean {
 // The output contract the engine must follow so everything downstream (classifyResult's miss
 // detection, the composer's fidelity relay) keeps working regardless of which engine ran. The
 // ANSWER/SOURCE/FLAGS shape is the same one the old native loop produced.
+// NOTICED (2026-10-04) is the material the composer's view of a finding is made of — what a person
+// sees on the way (is this number high, what changed, the catch). It sits right under ANSWER so the
+// two read together; classifyResult keys on the ANSWER/NO RESULT prefix and never sees it.
 const OUTPUT_CONTRACT = [
   'Reply with the final answer only — no preamble, no planning, no questions back. Format:',
   'ANSWER: <the concrete answer — every figure, date, name and address exactly as found>',
+  'NOTICED: <what stood out to you while finding it, the context that gives the answer its meaning: how it compares with what is usual, what is unusual or changing, the catch, the reason behind it. Only what you already saw on the way, never an extra lookup for it; every figure in it exact. "none" when nothing stood out>',
   'SOURCE: <where each hard fact came from (a page, a message, a file)>',
   'ACTIONS: <only when you DID something beyond reading — code run over what data, an artifact produced, a follow-up you scheduled and its fire time; required whenever the brief listed required actions, one report per item including any you could not do. Omit this line entirely when there is nothing to report.>',
   'FLAGS: <caveats or uncertainty, or "none">',

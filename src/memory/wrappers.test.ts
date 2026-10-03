@@ -172,6 +172,12 @@ test('includeMedium: the opt-in adds medium for a flexible-only agent, nothing e
   assert.ok(medium !== -1 && medium < flexible);
 });
 
+test('includeMedium: the composer is told who it is telling, and only under the opt-in', () => {
+  const line = 'what this finding means for them';
+  assert.ok(renderUserMemory('composer', baseData(), NOW, { includeMedium: true }).includes(line));
+  assert.ok(!renderUserMemory('composer', baseData(), NOW).includes(line));
+});
+
 test('flexible block renders LAST (recency) and the preamble FIRST', () => {
   const data = baseData({
     short: [shortEntry({ content: 'a look' })],
