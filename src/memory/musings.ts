@@ -17,8 +17,11 @@
 //     one she keeps texting into;
 //   • the chat has been quiet MUSING_QUIET_MS, so a live conversation keeps the thought for itself;
 //   • at most one musing per MUSING_GAP_MS, and never a second one they have not answered;
-//   • daytime where they are (MUSING_HOURS);
-//   • her own weather: a sad or scared core, a low mood or a spent social battery keeps it to herself;
+//   • an hour, in their zone, when this person tends to be around (theirHours, learned from when they
+//     text; MUSING_HOURS until there is enough history to learn from);
+//   • her own weather: a sad or scared core, a low mood or a spent social battery keeps it to herself.
+//     Read as it stands NOW (currentWeather): the stored row only moves on a turn, so one from hours
+//     ago is how the last conversation left her, and the hours since have rested her to the clock;
 //   • then chance (MUSING_CHANCE per eligible sweep), so she is a person with a thought and not a
 //     clock that fires at ten every morning;
 //   • then a seed she has not already texted about recently.
@@ -26,7 +29,7 @@
 // a failed send can never turn into a second text.
 
 import { getPreference, setPreferences } from '../db/repositories/memory.js';
-import { distinctUserHandles, getConversation, listActiveChats } from '../db/repositories/conversations.js';
+import { distinctUserHandles, getConversation, listActiveChats, userMessageTimes } from '../db/repositories/conversations.js';
 import { getAffectState } from '../db/repositories/affectState.js';
 import { readSelf } from '../db/repositories/self.js';
 import { readMoments } from '../db/repositories/moments.js';
@@ -37,6 +40,11 @@ import { familiarityBandFor, type FamiliarityBand } from '../persona/familiarity
 import { isGroupHandle } from './identity.js';
 import { dayKey, hourInZone } from '../pipeline/chatTime.js';
 import { DEFAULT_TZ } from '../pipeline/zonedTime.js';
+import { affectTargets } from '../persona/affectDrift.js';
+import { computeCircadian } from '../persona/circadian.js';
+import { computeCycle } from '../persona/cycle.js';
+import { cycleAnchorMs } from '../persona/config.js';
+import { AFFECT_FRESH_MS } from '../persona/threads.js';
 import { record } from '../diagnostics/trace.js';
 import { reportError } from '../diagnostics/errorLog.js';
 
@@ -50,8 +58,14 @@ export const MUSING_ACTIVE_WITHIN_MS = 7 * DAY;
 export const MUSING_QUIET_MS = 3 * HOUR;
 /** At most one musing per this window, per person. */
 export const MUSING_GAP_MS = 20 * HOUR;
-/** Their local hours she may text in, [from, to). */
+/** Their local hours she may text in, [from, to), until their own hours can be learned (theirHours). */
 export const MUSING_HOURS: readonly [number, number] = [10, 21];
+/** How far back their hours are learned from. */
+export const MUSING_HOURS_LEARN_MS = 14 * DAY;
+/** Days they must have texted on before their hours are trusted over MUSING_HOURS. */
+export const MUSING_HOURS_MIN_DAYS = 3;
+/** An hour is theirs once they have texted within an hour of it on this many different days. */
+export const MUSING_HOUR_MIN_DAYS = 2;
 /** The chance an eligible hourly sweep actually sends. About one a day across the daytime window. */
 export const MUSING_CHANCE = 0.12;
 /** Her weather floors: below either, the thought stays hers. */
@@ -108,8 +122,43 @@ export function pickSeed(seeds: readonly string[], recent: readonly string[], ra
   return open[Math.min(open.length - 1, Math.floor(rand * open.length))];
 }
 
+/** Pure: the hours of their day, in their zone, when they tend to be around, learned from when they
+ *  text. An hour counts once they have texted within an hour of it on MUSING_HOUR_MIN_DAYS different
+ *  days, so a one-off late night does not open the small hours. Null when they have texted on fewer
+ *  than MUSING_HOURS_MIN_DAYS days: too little to learn from, and the caller falls back. */
+export function theirHours(times: readonly number[], tz: string): Set<number> | null {
+  const daysAt: Set<string>[] = Array.from({ length: 24 }, () => new Set<string>());
+  const allDays = new Set<string>();
+  for (const t of times) {
+    const day = dayKey(t, tz);
+    allDays.add(day);
+    daysAt[hourInZone(t, tz)].add(day);
+  }
+  if (allDays.size < MUSING_HOURS_MIN_DAYS) return null;
+  const hours = new Set<number>();
+  for (let h = 0; h < 24; h++) {
+    const near = new Set([...daysAt[(h + 23) % 24], ...daysAt[h], ...daysAt[(h + 1) % 24]]);
+    if (near.size >= MUSING_HOUR_MIN_DAYS) hours.add(h);
+  }
+  return hours;
+}
+
+/** The slice of her affect row the weather gate reads. */
+export interface WeatherRead { mood_core?: string; mood_level?: number; social_battery?: number; at?: number }
+
+/** Pure but for the clock math: her weather as it stands at `now`. A row from the last few hours
+ *  (AFFECT_FRESH_MS, the window the turn itself trusts) is her weather. An older row, or none, is
+ *  read as rested: the gauge targets for this hour in their zone and this cycle day, the same
+ *  baseline every turn drifts toward (persona/affectDrift.ts). A rested read carries no core, since
+ *  the feeling word belonged to the conversation that wrote it. */
+export function currentWeather(last: WeatherRead | undefined, now: number, tz: string): WeatherRead {
+  if (last && typeof last.at === 'number' && now >= last.at && now - last.at <= AFFECT_FRESH_MS) return last;
+  const t = affectTargets({ cycle: computeCycle(now, cycleAnchorMs()), circadian: computeCircadian(now, tz) });
+  return { mood_level: t.mood_level, social_battery: t.social_battery };
+}
+
 /** Pure: does her weather leave room for a thought of her own? No row reads as yes. */
-export function weatherAllows(last: { mood_core?: string; mood_level?: number; social_battery?: number } | undefined): boolean {
+export function weatherAllows(last: WeatherRead | undefined): boolean {
   if (!last) return true;
   if (last.mood_core === 'sad' || last.mood_core === 'scared') return false;
   if (typeof last.mood_level === 'number' && last.mood_level < MUSING_MOOD_FLOOR) return false;
@@ -165,13 +214,15 @@ export async function runMusingSweep(deps: MusingDeps, opts: { now?: number; ran
         if (now - lastUserAt > MUSING_ACTIVE_WITHIN_MS) { skip('gone_quiet'); continue; }
         if (lastMusingAt > lastUserAt) { skip('unanswered'); continue; }
 
-        const tz = (await getPreference<string>(handle, 'agent_tz')) || DEFAULT_TZ;
-        let hour: number;
-        try { hour = hourInZone(now, tz); } catch { hour = hourInZone(now, DEFAULT_TZ); }
-        if (hour < MUSING_HOURS[0] || hour >= MUSING_HOURS[1]) { skip('hour'); continue; }
+        // Their zone, and one Intl will accept: a stored zone it rejects reads as the default.
+        let tz = (await getPreference<string>(handle, 'agent_tz')) || DEFAULT_TZ;
+        try { hourInZone(now, tz); } catch { tz = DEFAULT_TZ; }
+        const hour = hourInZone(now, tz);
+        const learned = theirHours(await userMessageTimes(chatId, now - MUSING_HOURS_LEARN_MS), tz);
+        if (learned ? !learned.has(hour) : hour < MUSING_HOURS[0] || hour >= MUSING_HOURS[1]) { skip('hour'); continue; }
 
         const affect = await getAffectState(chatId);
-        if (!weatherAllows(affect.last)) { skip('weather'); continue; }
+        if (!weatherAllows(currentWeather(affect.last, now, tz))) { skip('weather'); continue; }
         if (rand() >= MUSING_CHANCE) { skip('chance'); continue; }
 
         const recent = (await getPreference<string[]>(handle, 'musing_seeds')) ?? [];
@@ -184,9 +235,7 @@ export async function runMusingSweep(deps: MusingDeps, opts: { now?: number; ran
           last_musing_at: now,
           musing_seeds: [...(Array.isArray(recent) ? recent : []), seed].slice(-MUSING_SEED_MEMORY),
         });
-        let day: string;
-        try { day = dayKey(now, tz); } catch { day = dayKey(now, DEFAULT_TZ); }
-        const outcome = await deps.deliver({ chatId, kind: 'musing', text: seed, dedupeKey: `musing:${handle}:${day}` });
+        const outcome = await deps.deliver({ chatId, kind: 'musing', text: seed, dedupeKey: `musing:${handle}:${dayKey(now, tz)}` });
         counts.sent++;
         record({ type: 'event', label: 'musings:sent', chatId, handle, detail: { outcome } });
       } catch (err) {

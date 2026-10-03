@@ -229,6 +229,25 @@ export async function listActiveChats(sinceMs: number, limit = 20): Promise<{ ch
 }
 
 /**
+ * When they texted: the timestamp of every user row in this chat newer than `sinceMs`, oldest
+ * first. The musings sweep learns their waking hours from it (memory/musings.ts theirHours).
+ * Returns [] on any error (same fail-soft contract as getConversation).
+ */
+export async function userMessageTimes(chatId: string, sinceMs: number): Promise<number[]> {
+  try {
+    const rows = stmt(
+      `SELECT created_at AS at FROM messages
+       WHERE chat_id = ? AND role = 'user' AND created_at > ?
+       ORDER BY created_at ASC`
+    ).all(chatId, sinceMs) as unknown as { at: number }[];
+    return rows.map(r => r.at);
+  } catch (error) {
+    logDbError('userMessageTimes', error);
+    return [];
+  }
+}
+
+/**
  * Distinct handles that have SPOKEN in this chat (user rows carry the sender's handle), newest
  * first. The proactive pipeline's identity resolver reads this: exactly one handle means a 1:1 chat
  * whose personal memory is safe to load, more than one means a room that must fall back to the

@@ -116,7 +116,7 @@ export function selfEnabled(): boolean {
  * a `musing`. Its own line, apart from anything the user set up: no reminder, no cron job, no
  * watched mail rides it. On by default because the owner asked for her to start conversations
  * (scripts/configure.sh --musings off turns it off); the bounds live in the sweep (one a day at most,
- * daytime where they are, never on a quiet thread they left, never a room).
+ * at hours they are usually around, in their zone, never on a quiet thread they left, never a room).
  */
 export function musingsEnabled(): boolean {
   const v = (process.env.IRISES_MUSINGS_ENABLED || '').trim().toLowerCase();
