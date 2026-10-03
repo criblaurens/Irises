@@ -143,7 +143,7 @@ export function redactInternalTools(text: string | null | undefined): string {
 // Whole lines that are pure back-office machinery (the "how"/where the Composer always drops).
 const OPS_DROP_LINE = /^\s*(?:SOURCE|FLAGS|ACTIONS)\s*:/i;
 // Labels that prefix a real value — drop the label, keep the value.
-const OPS_STRIP_LABEL = /^\s*(?:ANSWER|NO RESULT|SUMMARY|SUBJECT|SENDER)\s*:\s*/i;
+const OPS_STRIP_LABEL = /^\s*(?:ANSWER|NOTICED|NO RESULT|SUMMARY|SUBJECT|SENDER)\s*:\s*/i;
 
 /**
  * Strip an echoed holding line off the front of a composed reply. The Composer is handed Irises's

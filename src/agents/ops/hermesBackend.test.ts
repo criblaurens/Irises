@@ -137,7 +137,7 @@ test('runTask: the doctrine header restates the limits that matter most on a gat
   const content = String(JSON.parse(String(captured[0].init.body)).messages[0].content);
   assert.ok(content.startsWith(HERMES_TASK_HEADER), 'nothing precedes the header');
   assert.match(HERMES_TASK_HEADER, /NEVER message the user on any channel yourself/);
-  assert.match(HERMES_TASK_HEADER, /ANSWER \/ SOURCE \/ optional ACTIONS \/ FLAGS/);
+  assert.match(HERMES_TASK_HEADER, /ANSWER \/ NOTICED \/ SOURCE \/ optional ACTIONS \/ FLAGS/);
   assert.match(HERMES_TASK_HEADER, /"NO RESULT:"/, 'the miss protocol survives an engine that never onboarded');
   // The hermes delegate lane deliberately withholds the parallel-subagent invitation (tools.ts,
   // pinned by delegateToolLane.test.ts) — the doctrine must not contradict the brief.

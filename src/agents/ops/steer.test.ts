@@ -52,7 +52,7 @@ test('steerPrompt: the wrapper is the exact text the engine is meant to read', (
   // the FLAGS clause is what turns a steer that missed its window into something the user hears.
   assert.equal(steerPrompt('  also check jakarta  '), [
     'The user just added to this task mid-run: "also check jakarta"',
-    'Fold it into the work you are doing now. Keep the same output contract (ANSWER / SOURCE / ACTIONS / FLAGS). If it arrived too late to act on, say so in FLAGS in one line rather than restarting.',
+    'Fold it into the work you are doing now. Keep the same output contract (ANSWER / NOTICED / SOURCE / ACTIONS / FLAGS). If it arrived too late to act on, say so in FLAGS in one line rather than restarting.',
   ].join('\n'));
 });
 
