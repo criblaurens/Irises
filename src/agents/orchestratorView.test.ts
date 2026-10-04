@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { VIEW_EDGE } from './orchestrator.js';
 
 test('the view edge states the move and the fact lock, with no sample phrasing', () => {
-  assert.match(VIEW_EDGE, /facts go out first and exactly as they came in/);
+  assert.match(VIEW_EDGE, /goes out first, whole, every fact exactly as it came in/);
   assert.match(VIEW_EDGE, /never adds a figure, date, name or claim that would need its own source/);
   assert.match(VIEW_EDGE, /heavy news gets a plain, careful view and no joke/);
   assert.ok(!VIEW_EDGE.includes('"'), 'no quoted sample utterance at the edge');
