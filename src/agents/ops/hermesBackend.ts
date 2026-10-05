@@ -4,7 +4,7 @@
 // modified. Per-chat continuity + engine-side memory scoping ride the X-Hermes-Session-Id/Key
 // headers, so hermes builds its own deepening model of each chat.
 import { readFile as fsReadFile } from 'node:fs/promises';
-import { EngineUnavailableError, EngineRunError, ENGINE_TIMEOUT_MS, CAP_ORDER, opsCancelEngineAbortEnabled } from './engineBackend.js';
+import { EngineUnavailableError, EngineRunError, ENGINE_TIMEOUT_MS, ENGINE_APPROVAL_WAIT_MS, CAP_ORDER, opsCancelEngineAbortEnabled } from './engineBackend.js';
 import type { EngineBackend, EngineRunContext, EngineRunHandle, ReminderSpec, ReminderRef, ReminderPatch, ReminderUpdateResult, ProbeResult, CapabilitySummary, CapabilityClass } from './engineBackend.js';
 import { HERMES_TASK_HEADER } from './hermesDoctrine.js';
 import { parseDeclaredCapabilities } from './capabilityDeclaration.js';
@@ -59,6 +59,8 @@ interface RunEventFrame {
   output?: string;
   error?: string;
   pending_steer?: string;
+  command?: string;
+  description?: string;
 }
 
 /** `GET /v1/runs/{id}` — the polling fallback's view of a run. */
@@ -507,6 +509,7 @@ export class HermesBackend implements EngineBackend {
   private static readonly RUN_SUBMIT_TIMEOUT_MS = 20_000;
   private static readonly RUN_STOP_TIMEOUT_MS = 3_000;
   private static readonly RUN_STEER_TIMEOUT_MS = 3_000;
+  private static readonly RUN_APPROVAL_TIMEOUT_MS = 3_000; // inside a live turn, like steer
   private static readonly RUN_POLL_INTERVAL_MS = 2_000;
   private static readonly RUN_POLL_REQUEST_TIMEOUT_MS = 10_000;
   /** How many polls IN A ROW may fail before we stop believing we can watch this run. Three, at
@@ -749,7 +752,7 @@ export class HermesBackend implements EngineBackend {
     const budgetMs = ctx.timeoutMs ?? ENGINE_TIMEOUT_MS;
     // ONE deadline for the whole run, so submit + events + polling together stay inside the budget
     // the caller was promised (the submit used to be able to spend it twice over).
-    const deadline = Date.now() + budgetMs;
+    let deadline = Date.now() + budgetMs;
     const { session } = this.sessionNow(task.chatId);
 
     const started = await this.requestText('/v1/runs', {
@@ -813,6 +816,15 @@ export class HermesBackend implements EngineBackend {
       }, delay);
     };
     scheduleGiveUp();
+    // A dangerous command waiting on THEIR answer (hermes's approval.request) leaves the run idle
+    // through no fault of its own, and hermes refuses by itself once its own window runs out. So the
+    // give-up moves out by that wait, once per ask: the run is never abandoned under a question the
+    // user is still reading. Only reached when the caller relays the ask (consumeRunEvents).
+    const holdForApproval = () => {
+      deadline = Math.max(deadline, Date.now() + ENGINE_APPROVAL_WAIT_MS);
+      if (timer) clearTimeout(timer);
+      scheduleGiveUp();
+    };
     const onCallerAbort = () => controller.abort();
     // ONE listener for BOTH give-ups: whichever aborts, hermes is told to stop. `once` so a caller
     // abort landing right after our timer cannot POST /stop twice.
@@ -830,7 +842,7 @@ export class HermesBackend implements EngineBackend {
     try {
       let outcome: RunOutcome | undefined;
       try {
-        outcome = await this.consumeRunEventsFrom(runId, controller.signal, ctx);
+        outcome = await this.consumeRunEventsFrom(runId, controller.signal, ctx, holdForApproval);
       } catch (err) {
         // A run outcome hermes reported (run.failed / run.cancelled) is the answer — pass it on.
         if (err instanceof EngineRunError) throw err;
@@ -880,7 +892,7 @@ export class HermesBackend implements EngineBackend {
    *  is unusable (a 404, a non-SSE body) or ends without one, which hands the decision to the poll
    *  fallback. Throws for a terminal FAILURE event; a transport error propagates to the caller's
    *  give-up check. */
-  private async consumeRunEventsFrom(runId: string, signal: AbortSignal, ctx: EngineRunContext): Promise<RunOutcome | undefined> {
+  private async consumeRunEventsFrom(runId: string, signal: AbortSignal, ctx: EngineRunContext, holdForApproval: () => void): Promise<RunOutcome | undefined> {
     const res = await this.deps.fetchFn(`${this.baseUrl}/v1/runs/${encodeURIComponent(runId)}/events`, {
       method: 'GET', headers: this.headers(), signal,
     });
@@ -891,7 +903,7 @@ export class HermesBackend implements EngineBackend {
       await res.text().catch(() => '');
       return undefined;
     }
-    return this.consumeRunEvents(res.body as ReadableStream<Uint8Array>, ctx);
+    return this.consumeRunEvents(res.body as ReadableStream<Uint8Array>, ctx, { runId, holdForApproval });
   }
 
   /**
@@ -900,40 +912,68 @@ export class HermesBackend implements EngineBackend {
    * reads as 'streaming', tool boundaries as 'engine_tool' — so the status line knows a long run is
    * alive. Returns on the terminal SUCCESS event; `undefined` when the stream simply ends.
    */
-  private async consumeRunEvents(body: ReadableStream<Uint8Array>, ctx: EngineRunContext): Promise<RunOutcome | undefined> {
+  private async consumeRunEvents(body: ReadableStream<Uint8Array>, ctx: EngineRunContext, run: { runId: string; holdForApproval: () => void }): Promise<RunOutcome | undefined> {
     let lastHeartbeat = 0;
     const HEARTBEAT_MS = 10_000;
     const heartbeat = (key: string) => {
       const now = this.deps.now();
       if (now - lastHeartbeat >= HEARTBEAT_MS) { lastHeartbeat = now; ctx.onProgress?.(key); }
     };
-    for await (const line of this.sseLines(body)) {
-      if (!line.startsWith('data:')) continue; // a keepalive / stream-closed comment
-      let frame: RunEventFrame;
-      try {
-        frame = JSON.parse(line.slice(5).trim()) as RunEventFrame;
-      } catch {
-        continue; // a partial or non-JSON frame — skip it, more will follow
+    // The dangerous-command ask this run is blocked on, between its `approval.request` and the next
+    // frame. hermes queues `approval.responded` before the answer's POST returns, so that frame is the
+    // next one whenever someone answered; ANY other frame first means nobody did. Settled exactly
+    // once, here or in the `finally`: a stream that ends or breaks under a waiting ask ends the wait
+    // too, because nothing can tell us how it went after that (the poll fallback carries no relay).
+    let awaiting: EngineRunHandle | undefined;
+    const settle = (how: 'answered' | 'expired') => {
+      if (!awaiting) return;
+      const handle = awaiting;
+      awaiting = undefined;
+      try { ctx.onApprovalSettled?.(handle, how); } catch { /* a relay must never outrank the run */ }
+    };
+    try {
+      for await (const line of this.sseLines(body)) {
+        if (!line.startsWith('data:')) continue; // a keepalive / stream-closed comment
+        let frame: RunEventFrame;
+        try {
+          frame = JSON.parse(line.slice(5).trim()) as RunEventFrame;
+        } catch {
+          continue; // a partial or non-JSON frame — skip it, more will follow
+        }
+        settle(frame.event === 'approval.responded' ? 'answered' : 'expired');
+        switch (frame.event) {
+          case 'message.delta':
+            heartbeat('streaming');
+            break;
+          case 'tool.started':
+          case 'tool.completed':
+            heartbeat('engine_tool');
+            break;
+          case 'run.completed':
+            return this.runOutcome(frame.output, frame.pending_steer);
+          case 'run.failed':
+            throw new EngineRunError(`hermes run failed: ${String(frame.error ?? 'no error text').slice(0, 300)}`, 'llm_error');
+          case 'run.cancelled':
+            throw new EngineRunError('hermes run was cancelled', 'cancelled');
+          case 'approval.request': {
+            // Relayed only when the caller hooked a relay (OPS_ENGINE_APPROVAL_RELAY); otherwise the
+            // frame is ignored exactly as it always was, and hermes's own timeout refuses.
+            if (!ctx.onApprovalRequest) break;
+            run.holdForApproval();
+            awaiting = { engine: 'hermes', runId: run.runId };
+            try {
+              ctx.onApprovalRequest({ handle: awaiting, command: String(frame.command ?? ''), description: String(frame.description ?? '') });
+            } catch { /* the run carries on */ }
+            break;
+          }
+          default:
+            break; // approval.responded (settled above) / run.steered / anything hermes adds later
+        }
       }
-      switch (frame.event) {
-        case 'message.delta':
-          heartbeat('streaming');
-          break;
-        case 'tool.started':
-        case 'tool.completed':
-          heartbeat('engine_tool');
-          break;
-        case 'run.completed':
-          return this.runOutcome(frame.output, frame.pending_steer);
-        case 'run.failed':
-          throw new EngineRunError(`hermes run failed: ${String(frame.error ?? 'no error text').slice(0, 300)}`, 'llm_error');
-        case 'run.cancelled':
-          throw new EngineRunError('hermes run was cancelled', 'cancelled');
-        default:
-          break; // run.steered / approval.request / anything hermes adds later
-      }
+      return undefined;
+    } finally {
+      settle('expired');
     }
-    return undefined;
   }
 
   /** The one reading of a terminal payload, shared by the stream and the poll: an absent `output` is
@@ -1074,6 +1114,23 @@ export class HermesBackend implements EngineBackend {
     if (res.status === 404 || res.status === 409) return 'not_running';
     this.throwForStatus(res, 'run steer'); // 401/403/429/5xx keep the seam's own vocabulary
     return 'not_running'; // unreachable: throwForStatus always throws on a non-2xx
+  }
+
+  /** Answer a dangerous-command ask a run is waiting on (EngineBackend.resolveRunApproval). 'once'
+   *  lets that ONE command run; never 'session'/'always', which would let later commands through
+   *  unasked. 404/409 is a run no longer waiting. Never throws: a relay must not take a turn down. */
+  async resolveRunApproval(handle: EngineRunHandle, choice: 'once' | 'deny'): Promise<'resolved' | 'not_pending' | 'failed'> {
+    if (handle.engine !== 'hermes') return 'not_pending';
+    try {
+      const res = await this.requestText(`/v1/runs/${encodeURIComponent(handle.runId)}/approval`, {
+        method: 'POST', headers: this.headers(), body: JSON.stringify({ choice }),
+      }, undefined, HermesBackend.RUN_APPROVAL_TIMEOUT_MS);
+      if (res.ok) return 'resolved';
+      if (res.status === 404 || res.status === 409) return 'not_pending';
+      return 'failed';
+    } catch {
+      return 'failed';
+    }
   }
 
   /**
