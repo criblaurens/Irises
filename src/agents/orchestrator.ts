@@ -2,7 +2,8 @@ import { runTask, legBudgetFor } from './ops/client.js';
 import { withDeadline, DeadlineError, type DeadlineExtender } from './deadline.js';
 import { setPreference } from '../db/repositories/memory.js';
 import { addShortTerm } from '../db/repositories/memoryShort.js';
-import { composeWithComposer } from './composerCore.js';
+import { composeWithComposerDetailed } from './composerCore.js';
+import { followUpCandidate, parkFollowUp } from './ops/followUp.js';
 import { markOpsDone, isOpsCancelled, noteOpsProgress, markOpsRetry, getOpsEtaStatus, getOpsEngineActions, getUnappliedSteers, normalizeRequest, extendOpsLeg, dropEngineAsks } from '../state/opsCoordination.js';
 import { detectCause, decide, splitMiss, retryTaskFor, steerReplayTaskFor, type TriageDecision } from './ops/triage.js';
 import { selectInterveningUserMessages } from './interveningMessages.js';
@@ -17,6 +18,7 @@ import { record } from '../diagnostics/trace.js';
 import { peekPendingInbound, selectUnseenPending } from '../state/inboundGlance.js';
 import type { SpeakContent, SpeakOpts, SpeakResult } from '../state/mouth.js';
 import { reportError } from '../diagnostics/errorLog.js';
+import { stripReplyTag } from '../state/replyThreading.js';
 import type { OpsTask, OpsResult, OpsDebrief, OpsDebriefSink } from './types.js';
 // Slim note: proactive follow-ups no longer materialize locally — the ENGINE owns scheduling
 // (its cron fires and delivers back through the /api/engine/push endpoint), so the old
@@ -208,12 +210,24 @@ export function settleLookEngineAsk(task: OpsTask, told: boolean): Promise<void>
  */
 export const VIEW_EDGE = "before you send: you read this before texting them about it, so it reaches them through you. the answer to what they asked goes out first, whole, every fact exactly as it came in. what you make of it rides along after, in your own words. for that line, check what's already between you, the chat above and what you hold about them: when something there touches this finding, something they said, a plan, a worry, a habit, the bit you two run, your line ties the finding to it. when nothing does, your line is about the finding itself, what kind of answer it is and what it says beyond itself, and the NOTICED line is usually where that is. say it as plainly as what came back lets you, as yours, and make it something only someone who read this one could say. it never adds a figure, date, name or claim that would need its own source. heavy news gets a plain, careful view and no joke.";
 
+/**
+ * The answer moment's rule about offers. With no next step on the table it is the standing one;
+ * with one (ops/followUp.ts), offering that step is her call, made against what they are doing now
+ * and in her own mood, and it never goes out as anything but a single yes/no last bubble. Principle
+ * only, like VIEW_EDGE. Exported for the pin test.
+ */
+export function nextStepClause(next?: string): string {
+  return next
+    ? `one step could come next that this look did not take: "${next}". offering it is your call: offer it only when you judge it helps them with what they're doing right now, as one yes/no question in your last bubble, in your own mood; otherwise leave it out`
+    : 'never a "want me to?" question';
+}
+
 async function composeFollowUp(
   result: OpsResult,
   task: OpsTask,
   moment: ComposeMoment,
-  extras: { missingFields?: string[]; giveUp?: boolean } = {},
-): Promise<{ text: string; toldSkippedStep: boolean }> {
+  extras: { missingFields?: string[]; giveUp?: boolean; next?: string } = {},
+): Promise<{ text: string; toldSkippedStep: boolean; offeredFollowUp: boolean }> {
   const { chatId, agentHandle: handle } = task;
   const attempt = task.attempt ?? 1;
 
@@ -245,7 +259,7 @@ async function composeFollowUp(
     // answers that, and holds the rest as one offer. "exactly as written" scopes fidelity to the
     // facts it relays — without the question here, a rich Ops pull reads as "relay all of this".
     // The NOTICED line is named as the material her view is made of.
-    instruction = `here's what you came back with. what they asked: "${task.request}". answer THAT, told to them and told the way you see it: the part that meets them leads, a couple of bubbles, not a report. the NOTICED line, when it's there, is what stood out while you were in there, and your view of this is made of it. anything true but beside their question doesn't go out as a fact of its own, and it can still shape what you think. no mention of what else you hold, and never a "want me to?" question. after the answer, one line that hands the thread back if the moment earns one, or none. whatever you do relay — every number, date, name, ~ and maybe — stays exactly as written:\n\n${result.summary}`;
+    instruction = `here's what you came back with. what they asked: "${task.request}". answer THAT, told to them and told the way you see it: the part that meets them leads, a couple of bubbles, not a report. the NOTICED line, when it's there, is what stood out while you were in there, and your view of this is made of it. anything true but beside their question doesn't go out as a fact of its own, and it can still shape what you think. no mention of what else you hold, and ${nextStepClause(extras.next)}. after the answer, one line that hands the thread back if the moment earns one, or none. whatever you do relay — every number, date, name, ~ and maybe — stays exactly as written:\n\n${result.summary}`;
 
     // The read behind this look was shaky: Convo scored its comprehension of the ask below the
     // clean-delegation band when it launched. The answer is still real — but it answers Convo's
@@ -296,7 +310,7 @@ async function composeFollowUp(
     // last, two-attempt ladder, echo tripwire) lives in composerCore.ts — shared with the proactive
     // path. Everything above is the framing this moment needs; the callback below adds the two
     // clauses that can only be written once the history is in hand.
-    const text = await composeWithComposer({
+    const { text, offeredFollowUp } = await composeWithComposerDetailed({
       chatId,
       handle,
       buildInstruction: history => {
@@ -330,9 +344,11 @@ async function composeFollowUp(
       edge: moment === 'answer' ? VIEW_EDGE : undefined,
       trace: { chatId, handle, taskId: result.taskId, label: 'composer' },
       errorDetail: { moment },
+      // With a next step on the table, the envelope reports whether her last bubble offered it.
+      ...(extras.next ? { followUp: true as const } : {}),
     });
     // Told them of a skipped step (best-effort): the composer's own text, written with the clause.
-    return { text, toldSkippedStep: skippedClause !== '' };
+    return { text, toldSkippedStep: skippedClause !== '', offeredFollowUp };
   } catch (err) {
     console.error('[orchestrator] composeFollowUp failed — handing to Fallfirm', err);
     // The composer's own attempts failed. Fallfirm is the second-chance voicer: it re-voices the
@@ -353,7 +369,7 @@ async function composeFollowUp(
     } else {
       outcome = { kind: 'failed', summary: 'you have their answer but sending it glitched on your end', nextStep: "tell them to ping again and you'll fire it right over" };
     }
-    return { text: await voiceOutcome(outcome, chatId, handle), toldSkippedStep: false };
+    return { text: await voiceOutcome(outcome, chatId, handle), toldSkippedStep: false, offeredFollowUp: false };
   }
 }
 
@@ -667,6 +683,12 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
 
     const attempt = task.attempt ?? 1;
 
+    // The step that could come next (ops/followUp.ts), decided before the mouth so the compose inside
+    // it knows whether offering one is on the table at all. Parked only once the answer is out.
+    const next = await followUpCandidate(task, result, moment === 'answer').catch(() => undefined);
+    let offered = false;
+    let deliveredText = '';
+
     // Deliver through the mouth: the durable markers AND the compose call run inside the per-chat
     // lock (the voicer thunk below). Two invariants this buys:
     //   • composeFollowUp reads the genuinely-latest thread — any reply Convo sent while Ops ran is
@@ -727,9 +749,11 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
       }
 
       const composeStart = Date.now();
-      const composed = await composeFollowUp(result, task, moment, { missingFields: triage?.missingFields, giveUp });
+      const composed = await composeFollowUp(result, task, moment, { missingFields: triage?.missingFields, giveUp, next });
       composeMs = Date.now() - composeStart;
       toldSkippedStep = composed.toldSkippedStep;
+      offered = composed.offeredFollowUp;
+      deliveredText = composed.text;
       return composed.text;
     }, {
       // Anchor the out-of-band answer to the user's original question: the FIRST bubble natively
@@ -752,6 +776,19 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
       return;
     }
     finalSent = true;
+
+    // Her call, made in the answer just delivered: an offer she ended on waits for their yes like any
+    // parked action, so a bare yes has something to start. Only once the answer is really on their
+    // screen, and only an offer that really is a question. Their yes is to the words they saw, so the
+    // whole message goes along as her offer (ops/followUp.ts): a last bubble alone can be a bare
+    // question that never names the step.
+    if (next) {
+      const offerText = deliveredText.split('\n---\n').map(b => stripReplyTag(b).trim()).filter(Boolean).join(' / ').slice(0, 600);
+      const parked = offered && deliveredText.trim().endsWith('?')
+        ? await parkFollowUp(task, next, result.summary, offerText).catch(() => false)
+        : false;
+      record({ type: 'event', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, label: 'ops:follow-up', detail: { offered, parked } });
+    }
   } catch (err) {
     // A cancelled run that errored needs no voicing either — they asked for silence.
     if (isOpsCancelled(task.chatId, task.id)) {

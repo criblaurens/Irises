@@ -6,7 +6,8 @@ process.env.DATA_BACKEND = 'memory';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VIEW_EDGE, skippedStepRelay } from './orchestrator.js';
+import { VIEW_EDGE, skippedStepRelay, nextStepClause } from './orchestrator.js';
+import { loadContext } from './loadContext.js';
 
 test('the view edge states the move and the fact lock, with no sample phrasing', () => {
   assert.match(VIEW_EDGE, /goes out first, whole, every fact exactly as it came in/);
@@ -32,4 +33,18 @@ test('an ending that asks them to narrow carries no skipped step; a give-up stil
   assert.equal(skippedStepRelay(step, 'needs_info'), '');
   assert.equal(skippedStepRelay(step, 'miss'), '', 'a steering question asks too');
   assert.match(skippedStepRelay(step, 'miss', true), /skipped and did not run/);
+});
+
+test('with no next step the answer keeps its standing rule; with one, offering it is her call', () => {
+  assert.equal(nextStepClause(), 'never a "want me to?" question', 'byte for byte what the answer said before');
+  const clause = nextStepClause('hold the 9am fare for them');
+  assert.match(clause, /"hold the 9am fare for them"/);
+  assert.match(clause, /offering it is your call/);
+  assert.match(clause, /one yes\/no question in your last bubble/);
+  assert.match(clause, /otherwise leave it out/);
+  assert.doesNotMatch(clause, /want me to/, 'no sample phrasing');
+});
+
+test('the composer persona names the one exception to its no-offer rule', () => {
+  assert.match(loadContext('composer'), /the one exception is a next step your brief itself hands you as yours to offer/);
 });
