@@ -167,12 +167,13 @@ export function steerRelay(unapplied: readonly string[], moment: ComposeMoment):
  * The clause for a step this look skipped while it waited on their OK (ops/engineApproval.ts): the
  * engine asked, nobody answered in time, and the step did not run. A fact to relay, never her call:
  * she already asked. Their yes still gets it done as a fresh run, which is why they must hear it was
- * skipped. '' on every look that skipped nothing. The command and description are the engine's own
- * text, so each is flattened to one line here: a newline in either could pass for a prompt heading.
- * Pure; exported for the pin test.
+ * skipped. '' on every look that skipped nothing, and on a needs_info question, which asks for one
+ * thing and names no process. The command and description are the engine's own text, so each is
+ * flattened to one line here: a newline in either could pass for a prompt heading. Pure; exported
+ * for the pin test.
  */
-export function skippedStepRelay(step: { command: string; description: string } | null): string {
-  if (!step) return '';
+export function skippedStepRelay(step: { command: string; description: string } | null, moment: ComposeMoment): string {
+  if (!step || moment === 'needs_info') return '';
   const flat = (s: string) => s.replace(/\s*[\r\n]+\s*/g, ' / ');
   const what = step.description ? `${flat(step.description)} (${flat(step.command)})` : flat(step.command);
   return `\n\none step of this look waited on their OK and ran out of time, so it was skipped and did not run: ${what}. say so in one plain clause as part of what you send. their yes still gets that step done as a fresh run: say that once, and leave the choice with them.`;
@@ -241,7 +242,7 @@ async function composeFollowUp(
   // And what they ADDED mid-run that the look never took in. Empty on almost every run.
   instruction += steerRelay(getUnappliedSteers(chatId, task.id), moment);
   // A step this look skipped while it waited on their OK. Empty on every look that skipped nothing.
-  instruction += skippedStepRelay(await skippedEngineStep(handle, task.id));
+  instruction += skippedStepRelay(await skippedEngineStep(handle, task.id), moment);
 
   // Continue straight from the exact holding line Irises last sent, so the late reply reads as one
   // seamless thread, not a fresh delivery. This is a continuity anchor only — never a fact source.
@@ -411,6 +412,8 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
             staleIfSpokenSince: voicedAt,
           }).catch(() => { /* progress is best-effort */ });
         },
+        // Held back before the gate while an engine ask waits, so the wait spends none of the budget.
+        () => !!relay?.waiting(),
       )
         // TERMINAL catch — the one that makes the floated calls below safe. Every caller of
         // voiceAndPing floats it (`void …`), and one of them fires from inside a setTimeout where

@@ -114,3 +114,17 @@ test('pings serialize with other sends — never interleaving another message\'s
   await wait(20);
   assert.deepEqual(order, ['bubble-1', 'bubble-2', 'bubble-3', 'PING'], 'ping waited for the whole message');
 });
+
+test('a ping held while an engine ask waits spends none of the run\'s budget', async () => {
+  __resetSendQueues();
+  const { sent, speak } = harness();
+  const budget = { remaining: 1 };
+  const gate = new ProgressGate({ quietMs: 0, gapMs: 0, maxPings: 1, budget });
+  let waiting = true;
+  await runPingCycle(gate, 'heartbeat', async () => 'still digging', pingSender(speak, gate, 'c'), () => waiting);
+  assert.equal(budget.remaining, 1, 'held back, not spent');
+  waiting = false;
+  await runPingCycle(gate, 'milestone', async () => 'still digging', pingSender(speak, gate, 'c'), () => waiting);
+  await wait(10);
+  assert.deepEqual(sent, ['still digging'], 'the run\'s one ping is still there once the ask is settled');
+});

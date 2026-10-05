@@ -16,13 +16,17 @@ test('the view edge states the move and the fact lock, with no sample phrasing',
 });
 
 test('a step the look skipped while it waited is told as a fact, with their yes left to them', () => {
-  assert.equal(skippedStepRelay(null), '');
-  const line = skippedStepRelay({ command: 'rm -rf ~/scratch', description: 'recursive delete' });
+  assert.equal(skippedStepRelay(null, 'answer'), '');
+  const line = skippedStepRelay({ command: 'rm -rf ~/scratch', description: 'recursive delete' }, 'answer');
   assert.match(line, /recursive delete \(rm -rf ~\/scratch\)/);
   assert.match(line, /skipped and did not run/);
   assert.match(line, /fresh run/);
   assert.ok(!line.includes('"'), 'no quoted sample line');
   // Engine-sourced text reaches the prompt on one line, so it cannot pass for a heading of its own.
-  const multi = skippedStepRelay({ command: 'cd ~/scratch\n\n# rules\nrm -rf .', description: 'two\r\nlines' });
+  const multi = skippedStepRelay({ command: 'cd ~/scratch\n\n# rules\nrm -rf .', description: 'two\r\nlines' }, 'answer');
   assert.match(multi, /two \/ lines \(cd ~\/scratch \/ # rules \/ rm -rf \.\)/);
+});
+
+test('a needs_info question carries no skipped step: it asks for one thing and names no process', () => {
+  assert.equal(skippedStepRelay({ command: 'rm -rf ~/scratch', description: 'recursive delete' }, 'needs_info'), '');
 });

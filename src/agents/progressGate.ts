@@ -87,6 +87,8 @@ export class ProgressGate {
  *   3. gate.isStopped re-check — if Ops settled while we were voicing, drop this now-stale reassurance
  *      so it never lands AFTER the real answer.
  *   4. send(text).
+ * `holdIf` is read before step 1: a ping held back (the run is waiting on their answer to an engine
+ * ask) spends nothing, so the run's one ping is still there once the wait is over.
  * Extracted from the orchestrator so this exact ordering is unit-testable (a future edit that voices
  * before gating, or forgets the post-voice re-check, fails a test instead of shipping a stale ping).
  * NEITHER `voice` NOR `send` may take the run down with it. Callers float this promise (`void
@@ -100,8 +102,9 @@ export async function runPingCycle(
   key: string,
   voice: () => Promise<string>,
   send: (text: string) => void,
+  holdIf?: () => boolean,
 ): Promise<void> {
-  if (!gate.allow(key)) return;
+  if (holdIf?.() || !gate.allow(key)) return;
   let text: string;
   try {
     text = await voice();

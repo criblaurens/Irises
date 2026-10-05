@@ -227,12 +227,13 @@ test('a late yes comes back as the step\'s own run, through the one delegation s
 });
 
 test('her line that the step is cleared stands on the engine answer: no corrective re-ask', async () => {
-  engineCalls();
+  const calls = engineCalls();
   try {
     const a = args('go');
     await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');
     const { turn, seen } = reasker(['you said nothing changed']);
     await processConvoResult({ ...a, res: makeResult(['all set']), turn });
+    assert.deepEqual(calls, [[ENGINE_REQ.handle, 'once']], 'the engine got the go-ahead');
     assert.equal(seen.length, 0, 'the claim is backed by what this turn did');
   } finally {
     __setEngineApprovalBackendForTests(undefined);

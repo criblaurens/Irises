@@ -64,7 +64,9 @@ export interface OpsTask {
   retryOf?: string;
   // Commands the user already said yes to, set ONLY on a late yes's re-run (agents/ops/engineApproval.ts):
   // when the engine pauses on one of these exact (engine-redacted) command strings, the relay answers
-  // 'once' without asking again. Any other command in that run is asked as usual. ABSENT otherwise.
+  // 'once' without asking again, the FIRST time only: the same command again in this task is asked
+  // about, so one yes never runs it twice. Any other command in that run is asked as usual. ABSENT
+  // otherwise.
   preApproved?: string[];
   // The task this one continues: a step she offered after it (agents/ops/followUp.ts), or the step a
   // late yes re-runs. One hop only: a task carrying it never offers a next step of its own.
