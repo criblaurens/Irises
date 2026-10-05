@@ -96,7 +96,7 @@ test('both lanes carry engine_actions, identically worded, optional, and separat
     // Done FIRST and reported back per item, failures included: a setup that failed must not vanish.
     assert.match(String(actions.description), /reports each one back, including the ones it could not do/);
     // And the bucket the old wording had no room for: acting on itself is not acting on the user.
-    assert.match(String(actions.description), /acting on ITSELF needs no approval from them; it is NOT `effect: act`/);
+    assert.match(String(actions.description), /acting on ITSELF is NOT `effect: act`; whether one waits for their go-ahead is decided for you/);
   }
   assert.equal(desc(openclaw, 'engine_actions'), desc(hermes, 'engine_actions'));
   assert.deepEqual((hermes.inputSchema as { required: string[] }).required, ['kind', 'request']);

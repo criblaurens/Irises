@@ -55,7 +55,7 @@ export const DELEGATE_TO_OPS_TOOL: LlmToolDef = {
       engine_actions: {
         type: 'array',
         items: { type: 'string' },
-        description: "Every thing they asked Ops to DO on its own side, beyond finding or reading — install or configure something for its own use, run a named procedure, prepare its environment for the work. One entry per action, in the order they asked, each self-contained (name the thing and where it comes from). Ops does these first and reports each one back, including the ones it could not do, so nothing you promised can quietly vanish. Ops acting on ITSELF needs no approval from them; it is NOT `effect: act`. Omit the argument when they asked for nothing done.",
+        description: "Every thing they asked Ops to DO on its own side, beyond finding or reading — install or configure something for its own use, run a named procedure, prepare its environment for the work. One entry per action, in the order they asked, each self-contained (name the thing and where it comes from). Ops does these first and reports each one back, including the ones it could not do, so nothing you promised can quietly vanish. Ops acting on ITSELF is NOT `effect: act`; whether one waits for their go-ahead is decided for you. Omit the argument when they asked for nothing done.",
       },
       effect: {
         type: 'string',
