@@ -21,7 +21,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { getPreference, setPreference } from '../../db/repositories/memory.js';
-import { resolveConsent } from './consent.js';
+import { resolveConsent, classifyConsent, hasConsentPhrase, CONSENT_YES_PHRASES } from './consent.js';
 import {
   getEngineBackend, engineApprovalRelayEnabled, ENGINE_APPROVAL_WAIT_MS,
   type EngineApprovalRequest, type EngineBackend, type EngineRunHandle, type EngineRunContext,
@@ -99,15 +99,13 @@ async function replaceMarker(sender: string, seen: EngineApprovalMarker, next: E
 const dropMarker = (sender: string, seen: EngineApprovalMarker) => replaceMarker(sender, seen, null)
   .catch(err => console.error('[ops] failed to clear pending_engine_approval', err));
 
-// A skipped step reached them inside a message that told them of it, so a reply made only of these
-// acknowledges that message: it is no go. An explicit go word (yes, yeah, yep, go, do it, run it, go
-// ahead) is in neither list, so a reply carrying one is never read as an acknowledgement.
-const ACKNOWLEDGEMENTS = new Set(['ok', 'okay', 'k', 'kk', 'sure', 'cool', 'alright', 'fine', 'thanks', 'thank', 'you', 'thx', 'ty']);
-const ACK_FILLER = new Set(['and', 'so', 'got', 'it', 'good', 'great', 'nice', 'sounds', 'very', 'much']);
-function onlyAcknowledges(text: string): boolean {
-  const words = text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  return words.some(w => ACKNOWLEDGEMENTS.has(w)) && words.every(w => ACKNOWLEDGEMENTS.has(w) || ACK_FILLER.has(w));
-}
+// A skipped step reached them inside a message that told them of it, and the words people answer
+// such a message with (ok, okay, sure, and every acknowledgement around them) are no go. So a
+// skipped step is re-run only on an EXPLICIT go: the lexicon's yes phrases minus those three, matched
+// the lexicon's way. Closed-world in the safe direction: a reply with none is unclear, and no
+// classify call can read an acknowledgement as yes. The owner writes in English, so a late yes in
+// another language re-asks, which is the cost D3 accepts.
+const LATE_GO_PHRASES = CONSENT_YES_PHRASES.filter(p => p !== 'ok' && p !== 'okay' && p !== 'sure');
 
 /** POST their answer. Never throws: an engine with no route, or a dead one, is 'failed'. */
 async function answer(handle: EngineRunHandle, choice: 'once' | 'deny'): Promise<'resolved' | 'not_pending' | 'failed'> {
@@ -228,7 +226,7 @@ const NOTHING: EngineApprovalOutcome = { result: null, rerun: null };
  *     run still waits on the very command they were shown; otherwise it is a late yes, unposted;
  *   • live, no → 'deny', and the run remembers the step was turned down;
  *   • skipped, yes → the step's own fresh run, nothing posted; skipped, no → let go, nothing posted;
- *     a bare acknowledgement of a skipped step is unclear, never a yes;
+ *     a skipped step's yes needs an explicit go phrase, else the reply is unclear;
  *   • unclear → nothing moves; past the shared clock → dropped.
  * Nothing moves either for a reply from another chat than the ask's, or one that predates the ask
  * (`receivedAt`, the newest text's arrival); a yes among them comes back as a `note` that it did not
@@ -260,23 +258,21 @@ export async function resolveEngineApproval(
   const elsewhere = a.chatId !== m.chatId ? 'it was sent in another chat'
     : a.receivedAt !== undefined && a.receivedAt < m.askedAt ? 'it came before the ask reached them'
     : null;
-  // Skipped, a bare acknowledgement is of the message that told them, never a go; live, the ask
-  // itself asked "go or no?", so an ok there answers it.
-  const acknowledges = state === 'timed_out' && onlyAcknowledges(a.text);
+  // Skipped, only an explicit go can be a yes (LATE_GO_PHRASES); live, the ask itself asked "go or
+  // no?", so an ok there answers it.
+  const explicitGo = state !== 'timed_out' || hasConsentPhrase(a.text, LATE_GO_PHRASES);
   if (elsewhere) {
-    const yes = !acknowledges && (await resolveConsent(a.text, action)) === 'yes';
+    const yes = explicitGo && (await resolveConsent(a.text, action)) === 'yes';
     rec({ decision: a.chatId !== m.chatId ? 'other_chat' : 'predates_ask', state, yes });
     return yes
       ? { ...NOTHING, note: { tool: 'engine_approval', status: 'unavailable', target: oneLine(m.command).slice(0, 80), detail: `that yes did not clear the step (${elsewhere}); the step is still waiting on a yes to the ask itself` } }
       : NOTHING;
   }
-  if (acknowledges) {
-    rec({ decision: 'unclear', state, reason: 'acknowledgement' });
-    return NOTHING;
-  }
-  const consent = await resolveConsent(a.text, action);
+  // With an explicit go the full reading runs as ever, negation included ("don't go ahead" is a no).
+  // Without one only the lexicon's no is read, with no classify call: a no runs nothing either way.
+  const consent = explicitGo ? await resolveConsent(a.text, action) : classifyConsent(a.text) === 'no' ? 'no' : 'unclear';
   if (consent === 'unclear') {
-    rec({ decision: 'unclear', state });
+    rec({ decision: 'unclear', state, ...(explicitGo ? {} : { reason: 'no_explicit_go' }) });
     return NOTHING;
   }
   if (consent === 'yes' && a.competing && (await resolveConsent(a.text, a.competing)) === 'yes') {

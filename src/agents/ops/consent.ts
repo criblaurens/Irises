@@ -103,6 +103,17 @@ function matchAt(tokens: string[], at: number, phrase: string[]): boolean {
   return true;
 }
 
+/** Does the reply carry one of `phrases` as whole words inside one clause, matched exactly the way
+ *  the lexicon matches (case-blind, clause-bounded)? Presence only: negation, mixed replies and the
+ *  rest are classifyConsent's, read after. */
+export function hasConsentPhrase(text: string, phrases: readonly string[]): boolean {
+  const split = phrases.map(p => p.split(' '));
+  return clauseTokens(text ?? '').some(tokens => split.some(phrase => {
+    for (let at = 0; at + phrase.length <= tokens.length; at++) if (matchAt(tokens, at, phrase)) return true;
+    return false;
+  }));
+}
+
 function negated(tokens: string[], at: number): boolean {
   for (let back = 1; back <= NEGATION_LOOKBACK; back++) {
     const word = tokens[at - back];

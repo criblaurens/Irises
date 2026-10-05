@@ -599,20 +599,38 @@ test('a yes to a command its run has moved past posts nothing, and re-runs exact
   assert.equal(await engineApprovalWaiting(t.agentHandle), false);
 });
 
-test('a bare acknowledgement of a skipped step is no answer; a clear yes still re-runs it', async () => {
-  const t = mkTask();
-  const calls: Calls = [];
-  await armEngineApproval(t, REQ, quiet, 'hermes');
-  await markEngineApprovalTimedOut(t.agentHandle, REQ.handle.runId);
-  const ack = await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'ok thanks')));
-  assert.deepEqual(ack, { result: null, rerun: null }, 'thanks for telling me is not a go');
-  const last = getTraces().filter(e => e.label === 'ops:engine_approval' && e.taskId === t.id).at(-1)?.detail as { decision?: string; reason?: string } | undefined;
-  assert.equal(last?.decision, 'unclear');
-  assert.equal(last?.reason, 'acknowledgement');
-  assert.equal(await engineApprovalWaiting(t.agentHandle), true, 'the step still waits on a clear answer');
-  const yes = await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'yes')));
-  assert.ok(yes.rerun, 'a clear yes still gets it done');
-  assert.deepEqual(calls, [], 'nothing posted either way: the engine stopped waiting');
+test('a skipped step re-runs only on an explicit go: an acknowledgement is no answer, and never reaches the lane', async () => {
+  let laneCalls = 0;
+  __setConsentLlmForTests(async () => { laneCalls++; return { text: 'YES', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' }; });
+  try {
+    const calls: Calls = [];
+    const skipped = async () => {
+      const t = mkTask();
+      await armEngineApproval(t, REQ, quiet, 'hermes');
+      await markEngineApprovalTimedOut(t.agentHandle, REQ.handle.runId);
+      return t;
+    };
+    const t = await skipped();
+    for (const text of ['oh ok', 'ok lol', 'sounds good', 'ok thanks']) {
+      const out = await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, text)));
+      assert.deepEqual(out, { result: null, rerun: null }, `"${text}" is not a go`);
+      const last = getTraces().filter(e => e.label === 'ops:engine_approval' && e.taskId === t.id).at(-1)?.detail as { decision?: string; reason?: string } | undefined;
+      assert.equal(last?.decision, 'unclear');
+      assert.equal(last?.reason, 'no_explicit_go');
+    }
+    assert.equal(laneCalls, 0, 'no classify call: the lane might read an acknowledgement as yes');
+    assert.equal(await engineApprovalWaiting(t.agentHandle), true, 'the step still waits on a clear answer');
+    assert.ok((await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'yes')))).rerun, 'a clear yes still gets it done');
+    const u = await skipped();
+    assert.ok((await withEngine('resolved', calls, () => resolveEngineApproval(reply(u, 'yeah go ahead')))).rerun);
+    const v = await skipped();
+    const declined = await withEngine('resolved', calls, () => resolveEngineApproval(reply(v, "don't go ahead")));
+    assert.equal(declined.rerun, null, 'a negated go is still read as the no it is');
+    assert.equal(await engineApprovalWaiting(v.agentHandle), false, 'and lets the step go');
+    assert.deepEqual(calls, [], 'nothing posted: the engine stopped waiting');
+  } finally {
+    __setConsentLlmForTests(unclearLane);
+  }
 });
 
 test('live, the ask itself asked go or no, so an ok answers it', async () => {

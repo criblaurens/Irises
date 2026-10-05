@@ -331,7 +331,7 @@ async function composeFollowUp(
       trace: { chatId, handle, taskId: result.taskId, label: 'composer' },
       errorDetail: { moment },
     });
-    // Told them of a skipped step only when the composer's own text went out with the clause in it.
+    // Told them of a skipped step (best-effort): the composer's own text, written with the clause.
     return { text, toldSkippedStep: skippedClause !== '' };
   } catch (err) {
     console.error('[orchestrator] composeFollowUp failed — handing to Fallfirm', err);
@@ -454,7 +454,11 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
   const stopAllPings = () => { for (const s of pingStops) s(); };
 
   let finalSent = false; // the double-send latch: never voice a failure after an answer already shipped
-  let toldSkippedStep = false; // the composer's answer told them of a skipped step (settleLookEngineAsk)
+  // The composer's answer told them of a skipped step (settleLookEngineAsk). Best-effort: it means the
+  // clause was in the composer's instruction and the composer's own text went out, not that the
+  // text is known to name the step. The backstop is resolveEngineApproval's explicit-go rule: a
+  // skipped step runs only on an explicit English go, never on an acknowledgement.
+  let toldSkippedStep = false;
   try {
     record({
       type: 'delegation', chatId: task.chatId, handle: task.agentHandle, taskId: task.id,
