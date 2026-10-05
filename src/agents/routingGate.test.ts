@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  needsGrounding, salvageHoldingText, refusalLike, refusedCapabilities,
+  needsGrounding, salvageHoldingText, salvageHold, refusalLike, refusedCapabilities,
   holdsTheAnswer, heldMemoryBrief, routingGateHitReceipt,
   routingGateMemoryAwareEnabled, HELD_MEMORY_KINDS, OPS_HELD_MEMORY_CHARS, OPS_HELD_LINE_CHARS,
   OPS_HELD_BLOCK_CHARS,
@@ -400,4 +400,56 @@ test('the memory-aware half of the gate has the siblings’ flag parse, default 
     if (prev === undefined) delete process.env.CONVO_ROUTING_GATE_MEMORY_AWARE;
     else process.env.CONVO_ROUTING_GATE_MEMORY_AWARE = prev;
   }
+});
+
+// ── The whole hold (2026-10-04): the look as the turn's only action keeps her reaction and her
+// answers to anything else they said, not just one beat. ──
+
+test("a quoting beat survives the salvage: the quote tag's index is not a figure", () => {
+  assert.equal(
+    salvageHoldingText('[[re:1]]on the commit thing, lemme check', 'no i mean, just search the average commit of solo project on github'),
+    '[[re:1]]on the commit thing, lemme check',
+  );
+});
+
+test('whole hold: a burst keeps her beat and her answer to their other text', () => {
+  const draft = '[[re:1]]on the commit thing, lemme check\n---\n[[re:2]]and who, the ppl reachin out to work with u';
+  assert.deepEqual(
+    salvageHold(draft, 'no i mean, just search the average commit of solo project on github\n\nwho?'),
+    { text: draft, lookRe: 1 },
+  );
+});
+
+test('whole hold: her reaction and an answer ahead of the leaving line ship with it', () => {
+  assert.deepEqual(
+    salvageHold('bali trip huh\n---\nlet me find the cheap one for u', 'search cheapest flight to bali next week'),
+    { text: 'bali trip huh\n---\nlet me find the cheap one for u', lookRe: null },
+  );
+  assert.deepEqual(
+    salvageHold('the ppl reachin out to work with u\n---\nlemme check the commit thing', 'search the avg commits for solo github projects. also who did u mean?'),
+    { text: 'the ppl reachin out to work with u\n---\nlemme check the commit thing', lookRe: null },
+  );
+});
+
+test('whole hold: past the beat, only an answer quoted to a different text of theirs survives', () => {
+  // Single message: the tail after the beat is what the composer re-answers, so it is cut.
+  assert.deepEqual(
+    salvageHold("pulling the owner up now\n---\nowner's the Hendersons", 'who owns 412 Maple?'),
+    { text: 'pulling the owner up now', lookRe: null },
+  );
+  // Burst: an untagged bubble after the beat inherits the beat's quote, so it is the same tail.
+  assert.deepEqual(
+    salvageHold('[[re:1]]lemme check\n---\nprob a few hundred for most', 'avg commits?\n\nwho?'),
+    { text: '[[re:1]]lemme check', lookRe: 1 },
+  );
+});
+
+test('whole hold: the shared screen stops the walk, and no beat keeps nothing', () => {
+  // An unsaid figure before any beat: nothing is kept.
+  assert.equal(salvageHold('you sold them 412 Elm back in March\n---\nchecking the exact date now'), null);
+  // A claimed result after a reaction: the reaction alone holds no line.
+  assert.equal(salvageHold("again huh\n---\nchecked, there's nothing new"), null);
+  assert.equal(salvageHold('bali trip huh'), null);
+  assert.equal(salvageHold(null), null);
+  assert.equal(salvageHold(''), null);
 });
