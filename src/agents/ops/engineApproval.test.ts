@@ -51,7 +51,7 @@ test('the ask goes out with the command exactly as the engine reported it, and n
   let standingAtSend = true;
   await armEngineApproval(t, REQ, async (_chat, text) => { standingAtSend = await engineApprovalWaiting(t.agentHandle); sent.push(text); return 'sent' as const; }, 'hermes');
   assert.deepEqual(sent, [renderEngineApprovalAsk(REQ, 'hermes')]);
-  assert.match(sent[0], /^your hermes wants to run this before it carries on \(recursive delete\)\nrm -rf ~\/scratch\ngo or no\?$/);
+  assert.match(sent[0], /^your hermes wants to run this before it keeps going \(recursive delete\)\nrm -rf ~\/scratch\nyou ok with that\?$/);
   assert.equal(standingAtSend, false, 'nothing to answer before the ask is on their screen');
   assert.equal(await engineApprovalWaiting(t.agentHandle), true);
   assert.deepEqual(decisions(t.id), ['requested']);
@@ -633,7 +633,7 @@ test('a skipped step re-runs only on an explicit go: an acknowledgement is no an
   }
 });
 
-test('live, the ask itself asked go or no, so an ok answers it', async () => {
+test('live, the ask itself asked whether they are ok with it, so an ok answers it', async () => {
   const t = mkTask();
   const calls: Calls = [];
   await armEngineApproval(t, REQ, quiet, 'hermes');

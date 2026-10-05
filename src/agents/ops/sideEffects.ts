@@ -197,12 +197,27 @@ export function renderApprovalAsk(
   return `SYSTEM: you were about to have the engine ${request}${actions}. ${why.join('. ')}, so ask them in one short line whether to go ahead, in your own words${naming}; do not claim it is running; no tool calls.`;
 }
 
+/** A request that already asks (an offer she made, parked in her own words by ops/followUp.ts) is
+ *  asked again as it stands; wrapping it in a second "want me to" would stack the two. */
+function asksItself(request: string): boolean {
+  return /\?\s*$/.test(request) || /^\s*(want|wanna) me to\b/i.test(request);
+}
+
+/** `request` with the engine actions folded in ahead of its closing question mark, so the line
+ *  still ends on the question. */
+function withFirst(request: string, first: string): string {
+  return `${request.trim().replace(/\?\s*$/, '')}${first}?`;
+}
+
 /** The code floor under that re-ask: one line, her register, when the model cannot be reached or
- *  comes back unusable. Never silent, never a false in-flight claim. It carries the engine actions
- *  verbatim, links included, because this line is what ships when her own ask left one out. */
+ *  comes back unusable. Never silent, never a false in-flight claim, and it names no magic word: the
+ *  consent reader takes any natural yes. It carries the engine actions verbatim, links included,
+ *  because this line is what ships when her own ask left one out. */
 export function approvalAskFallback(request: string, engineActions: readonly string[] = []): string {
   const first = engineActions.length ? ` (first: ${engineActions.join('; ')})` : '';
-  return `before i do it — you want me to ${request}${first}? say go and i go`;
+  return asksItself(request)
+    ? `before i do it, ${withFirst(request, first)}`
+    : `before i do it, you want me to ${request}${first}?`;
 }
 
 /**
@@ -217,10 +232,13 @@ export function renderReconfirmAsk(request: string, engineActions: readonly stri
   return `SYSTEM: they just said yes, but the action they are agreeing to — have the engine ${request}${actions} — was asked about long enough ago that it expired, so nothing has started. Ask them in one short line whether they still want it, naming the action${naming}; do not claim it is running; no tool calls.`;
 }
 
-/** The code floor under the re-confirm, same discipline as approvalAskFallback. */
+/** The code floor under the re-confirm, same discipline as approvalAskFallback. An offer in her own
+ *  words goes out again on its own line, under the one that says why. */
 export function reconfirmAskFallback(request: string, engineActions: readonly string[] = []): string {
   const first = engineActions.length ? ` (first: ${engineActions.join('; ')})` : '';
-  return `that one expired a while ago — still want me to ${request}${first}?`;
+  return asksItself(request)
+    ? `that one expired a while ago, asking again\n${withFirst(request, first)}`
+    : `that one expired a while ago, still want me to ${request}${first}?`;
 }
 
 /**

@@ -75,10 +75,11 @@ export function __setEngineApprovalBackendForTests(b: EngineBackend | null | und
 const backend = (): EngineBackend | null => (backendForTests !== undefined ? backendForTests : getEngineBackend());
 
 /** The ask, in her register: the engine is THEIRS ("your hermes"), the command sits whole on its own
- *  line (the bubble splitter breaks at newlines), and the question is the last line. */
+ *  line (the bubble splitter breaks at newlines), and the question is the last line. It names no
+ *  magic word: the consent reader takes any natural yes or no. */
 export function renderEngineApprovalAsk(req: { command: string; description: string }, engineName: string): string {
   const why = req.description ? ` (${req.description})` : '';
-  return `your ${engineName} wants to run this before it carries on${why}\n${req.command}\ngo or no?`;
+  return `your ${engineName} wants to run this before it keeps going${why}\n${req.command}\nyou ok with that?`;
 }
 
 async function readMarker(sender: string): Promise<EngineApprovalMarker | undefined> {
@@ -258,8 +259,8 @@ export async function resolveEngineApproval(
   const elsewhere = a.chatId !== m.chatId ? 'it was sent in another chat'
     : a.receivedAt !== undefined && a.receivedAt < m.askedAt ? 'it came before the ask reached them'
     : null;
-  // Skipped, only an explicit go can be a yes (LATE_GO_PHRASES); live, the ask itself asked "go or
-  // no?", so an ok there answers it.
+  // Skipped, only an explicit go can be a yes (LATE_GO_PHRASES); live, the ask itself asked whether
+  // they are ok with it, so an ok there answers it.
   const explicitGo = state !== 'timed_out' || hasConsentPhrase(a.text, LATE_GO_PHRASES);
   if (elsewhere) {
     const yes = explicitGo && (await resolveConsent(a.text, action)) === 'yes';
