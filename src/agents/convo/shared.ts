@@ -12,6 +12,7 @@ import {
   approvalAskFallback, classifySideEffect, coerceEffect, opsApprovalGateEnabled, renderApprovalAsk,
   reconfirmAskFallback, renderReconfirmAsk,
 } from '../ops/sideEffects.js';
+import { readTaint, judgeHostSetup, gateReasons, type GateReason } from '../ops/riskGate.js';
 import { resolveConsent } from '../ops/consent.js';
 import {
   getOpsTask, insertPendingApproval, listPendingApprovals, promoteToRunning, settleOpsTask,
@@ -2752,6 +2753,42 @@ export async function enforceQuiet(
 
 // ── The approval ask ────────────────────────────────────────────────────────────────────────────
 /**
+ * Park a built delegation behind their yes: the durable row, the marker beside
+ * pending_clarification, the receipt, and the turn's ask. One function for every way an ask can
+ * need a yes (agents/ops/riskGate.ts reasons), and for both callers, delegate_to_ops and a steer
+ * whose added actions wait as a look of their own, so every one resolves through the one reading.
+ *
+ * Nothing is handed back for kickoff: index.ts starts a run only from `delegatedTask`, so a parked
+ * task cannot start anything (INV-1 untouched, nothing is marked in flight).
+ */
+async function parkForApproval(built: OpsTask, a: {
+  chatId: string; handle: string | undefined; sender: string; reasons: GateReason[];
+  trigger: string; taintedBy?: string; effects: TurnEffects;
+}): Promise<void> {
+  const askedAt = Date.now();
+  built.approval = { askedAt };
+  // The whole task is serialized into the row (every field is JSON-safe) so the yes runs exactly
+  // the brief she asked about, even after a restart.
+  const parked = insertPendingApproval({
+    id: built.id, chatId: a.chatId, kind: built.kind, request: built.request, meta: { task: built },
+  }, askedAt);
+  if (!parked) {
+    record({ type: 'event', chatId: a.chatId, taskId: built.id, label: 'ops:durable-write-lost', detail: { taskId: built.id, kind: built.kind, at: 'approval' } });
+  }
+  await setPreference(a.sender, 'pending_approval', {
+    taskId: built.id, request: built.request, kind: built.kind, askedAt, effect: built.effect, reasons: a.reasons,
+    ...(built.engineActions?.length ? { engineActions: built.engineActions } : {}),
+  }).catch(err => console.error('[convo] failed to persist pending_approval', err));
+  record({ type: 'event', label: 'ops:approval', chatId: a.chatId, handle: a.handle, detail: { decision: 'requested', trigger: a.trigger, taskId: built.id, reasons: a.reasons } });
+  console.log(`[convo] parked an action behind the user's approval (${a.reasons.join('+')}, chat ${a.chatId})`);
+  a.effects.parkedApproval = {
+    request: built.request, variant: 'park', reasons: a.reasons,
+    ...(built.engineActions?.length ? { engineActions: built.engineActions } : {}),
+    ...(a.taintedBy ? { taintedBy: a.taintedBy } : {}),
+  };
+}
+
+/**
  * ONE corrective re-ask for a delegation the approval gate just parked — the same mechanism, the
  * same seam and the same accept discipline as the unkept-promise guard above, for the mirror-image
  * failure. There she promised work that was not happening; here work really is not happening, and
@@ -2772,19 +2809,21 @@ export async function enforceQuiet(
  */
 async function askForApproval(
   args: { res: LlmResult; chatId: string; handle: string | undefined; turn?: ConvoTurnContext },
-  request: string,
+  parked: { request: string; variant: 'park' | 'reconfirm'; reasons?: GateReason[]; engineActions?: string[]; taintedBy?: string },
   guard: ToolCallGuard,
-  variant: 'park' | 'reconfirm' = 'park',
   budget?: ConvoCallBudget,
 ): Promise<string> {
   const { res, chatId, handle } = args;
+  const { request, variant } = parked;
   // With no convo call left this turn, the code line is the question.
   const turn = args.turn && takeConvoCall(budget) ? args.turn : undefined;
   // Two notes, one mechanism: the park's ("you were about to…") and the expired yes's ("they said
   // yes, but the ask had run out"). Both are questions about the same action, and both must be
   // impossible to mistake for a claim that it is running.
-  const note = variant === 'reconfirm' ? renderReconfirmAsk(request) : renderApprovalAsk(request);
-  const fallback = variant === 'reconfirm' ? reconfirmAskFallback(request) : approvalAskFallback(request);
+  const note = variant === 'reconfirm' ? renderReconfirmAsk(request, parked.engineActions) : renderApprovalAsk(request, parked);
+  const fallback = variant === 'reconfirm'
+    ? reconfirmAskFallback(request, parked.engineActions)
+    : approvalAskFallback(request, parked.engineActions);
   let asked: string | null = null;
   if (turn) {
     try {
@@ -2811,6 +2850,15 @@ async function askForApproval(
       reportError({ source: 'convo', category: 'retry_exhausted', severity: 'warn', err, detail: { guard: 'approval_ask' }, chatId, handle });
     }
   }
+  // They approve what they can see: a link the engine would pull from has to be on their screen
+  // exactly as written, or the code line (which carries it) goes instead.
+  const links = (parked.engineActions ?? [])
+    .flatMap(act => act.match(/https?:\/\/\S+/gi) ?? [])
+    .map(link => link.replace(/[.,;:!?)\]]+$/, ''));
+  if (asked && links.some(link => !asked!.includes(link))) {
+    console.warn(`[convo] the approval ask left out a link the engine would use; asking in one line instead (chat ${chatId})`);
+    asked = null;
+  }
   record({ type: 'event', label: 'convo:approval_ask', chatId, handle, detail: { resolved: asked ? 'reasked' : 'fallback', variant } });
   return asked ?? fallback;
 }
@@ -2833,6 +2881,12 @@ interface PendingApprovalPref {
    *  marker as well as in the row, so the thin fallback task below is still the brief she asked
    *  about rather than its reading half. */
   engineActions?: string[];
+  /** The effect the task was parked with. A yes runs it as that: an approved setup or a tainted
+   *  look stays a read, so the brief's AUTHORIZED ACTION line (keyed to 'act') lifts nothing it
+   *  never asked to. Absent on markers written before the taint gate, which only ever parked acts. */
+  effect?: 'read' | 'act';
+  /** Why it waited (agents/ops/riskGate.ts). For the receipts. */
+  reasons?: GateReason[];
   /** When the ask ran out of clock. The row is already settled 'expired' by then; the marker lives
    *  one more TTL so a yes that arrives a couple of turns late still gets its one re-ask rather than
    *  landing on nothing (user decision 2026-09-04). */
@@ -2844,7 +2898,7 @@ interface ApprovalOutcome {
   /** The promoted task, ready for the ONE kickoff site (index.ts, inside this turn's lock). */
   task: OpsTask | null;
   /** The action to re-ask about, when a yes arrived after the ask had already expired. */
-  reconfirm: string | null;
+  reconfirm: { request: string; engineActions?: string[] } | null;
   /** The parked action their no just dropped. Kept apart from "nothing was pending" because the
    *  turn owes it a result: a cancel_research written beside the no finds neither the row (it is
    *  settled) nor a run, and its miss must not read as the answer to what they asked. */
@@ -2870,7 +2924,7 @@ function approvedTask(pa: PendingApprovalPref, chatId: string, sender: string, n
     ? { ...(stored as OpsTask) }
     : {
         id: String(pa.taskId), chatId, agentHandle: sender, kind,
-        request: String(pa.request), effect: 'act', createdAt: now, media: emptyMedia(),
+        request: String(pa.request), effect: pa.effect ?? 'act', createdAt: now, media: emptyMedia(),
         ...(pa.engineActions?.length ? { engineActions: pa.engineActions } : {}),
       };
   return {
@@ -2878,7 +2932,7 @@ function approvedTask(pa: PendingApprovalPref, chatId: string, sender: string, n
     // `reconfirm` rides along so a re-confirmed yes is readable on the task itself.
     task: {
       ...base,
-      effect: 'act',
+      effect: base.effect === 'read' ? 'read' : 'act',
       approval: {
         ...(base.approval ?? { askedAt: pa.askedAt ?? now }),
         approvedAt: now,
@@ -2976,10 +3030,17 @@ async function resolvePendingApproval(a: {
     if (!insertPendingApproval({ id: fresh.id, chatId: a.chatId, kind: fresh.kind, request: fresh.request, meta: { task: fresh } }, now)) {
       record({ type: 'event', chatId: a.chatId, taskId: fresh.id, label: 'ops:durable-write-lost', detail: { taskId: fresh.id, kind: fresh.kind, at: 'reconfirm' } });
     }
-    await setPreference(a.sender, 'pending_approval', { taskId: fresh.id, request: fresh.request, kind: fresh.kind, askedAt: now, reconfirm: true })
-      .catch(err => console.error('[convo] failed to persist pending_approval', err));
+    await setPreference(a.sender, 'pending_approval', {
+      taskId: fresh.id, request: fresh.request, kind: fresh.kind, askedAt: now, reconfirm: true, effect: fresh.effect,
+      ...(pa.reasons ? { reasons: pa.reasons } : {}),
+      ...(fresh.engineActions?.length ? { engineActions: fresh.engineActions } : {}),
+    }).catch(err => console.error('[convo] failed to persist pending_approval', err));
     rec({ decision: 'reconfirm', taskId: fresh.id, of: pa.taskId, ageMs: latencyMs });
-    return { task: null, reconfirm: fresh.request, declined: null };
+    return {
+      task: null,
+      reconfirm: { request: fresh.request, ...(fresh.engineActions?.length ? { engineActions: fresh.engineActions } : {}) },
+      declined: null,
+    };
   };
   const declinedOutcome = (): ApprovalOutcome => ({ ...NO_APPROVAL, declined: { id: String(pa.taskId), request: String(pa.request) } });
 
@@ -3217,7 +3278,7 @@ export interface TurnEffects {
   suppressedDuplicate: boolean;
   /** An action parked behind the user's approval (or a late yes that must be re-asked): the
    *  question replaces her holding line, and the slot is held. */
-  parkedApproval: { request: string; variant: 'park' | 'reconfirm' } | null;
+  parkedApproval: { request: string; variant: 'park' | 'reconfirm'; reasons?: GateReason[]; engineActions?: string[]; taintedBy?: string } | null;
   /** What this turn's cancels actually dropped. */
   cancelled: CancelledRef[];
   /** This chat's reminders as the turn sees them: read live once, by the first reminder call that
@@ -3668,32 +3729,20 @@ async function dispatchToolCalls(calls: LlmToolCall[], effects: TurnEffects, ctx
       // anything and INV-1 (markOpsStart inside the lock) is untouched because nothing is marked.
       // Task 38 turns the answer into a run.
       if (opsApprovalGateEnabled()) {
-        if (built.effect === 'act') {
-          const askedAt = Date.now();
-          built.approval = { askedAt };
-          // The whole task is serialized into the row (every field is JSON-safe) so the yes can run
-          // exactly the brief she asked about, even after a restart. Row keyed by chat like every
-          // other ops_tasks row; the pref keyed by sender like every other agent_prefs marker.
-          const parked = insertPendingApproval({
-            id: built.id, chatId, kind: built.kind, request: built.request, meta: { task: built },
-          }, askedAt);
-          if (!parked) {
-            // Not fatal to the turn — she still asks, and a yes on the next turn still finds the
-            // pref. What is lost is the row that would have carried the brief across a restart, and
-            // the same receipt Task 35's sink files makes that silence readable.
-            record({ type: 'event', chatId, taskId: built.id, label: 'ops:durable-write-lost', detail: { taskId: built.id, kind: built.kind, at: 'approval' } });
-          }
-          await setPreference(chatContext.senderHandle, 'pending_approval', {
-            // The actions ride the marker as well as the row: the marker is the fallback the resume
-            // builds from when the row is gone, and a yes that dropped the work half would authorize
-            // a different brief than the one she asked about.
-            taskId: built.id, request: built.request, kind: built.kind, askedAt,
-            ...(built.engineActions?.length ? { engineActions: built.engineActions } : {}),
-          }).catch(err => console.error('[convo] failed to persist pending_approval', err));
-          record({ type: 'event', label: 'ops:approval', chatId, handle, detail: { decision: 'requested', trigger: sideEffect.trigger, taskId: built.id } });
-          // chatId in the line: the park is invisible otherwise — nothing starts, nothing is marked.
-          console.log(`[convo] parked an action behind the user's approval (${sideEffect.trigger}, chat ${chatId})`);
-          effects.parkedApproval = { request: built.request, variant: 'park' };
+        // Three reasons to wait for their yes (agents/ops/riskGate.ts): the engine would act on
+        // something of theirs; an engine action would bring code onto their machine or run it there;
+        // or an engine action is proposed while text from outside is in her context. The two newer
+        // reads run only when there is an engine action to read, so a plain look pays for neither.
+        const taint: { tainted: boolean; from?: string } = engineActions.length
+          ? await readTaint(chatContext.senderHandle)
+          : { tainted: false };
+        const host = engineActions.length ? await judgeHostSetup(engineActions) : { risky: false };
+        const reasons = gateReasons({ effect: built.effect, engineActions, hostSetup: host.risky, tainted: taint.tainted });
+        if (reasons.length) {
+          await parkForApproval(built, {
+            chatId, handle, sender: chatContext.senderHandle, reasons,
+            trigger: sideEffect.trigger, taintedBy: taint.from, effects,
+          });
           continue;
         }
         // Fires on the NO-OP path too: a read delegation is the answer the gate gives thousands of
@@ -4002,7 +4051,7 @@ export async function processConvoResult(args: {
   // The flag read comes FIRST: with OPS_APPROVAL_GATE off nothing here runs at all — no prefs read,
   // no classify call, no promotion — and a parked row from before the flip is left exactly as it is.
   let settledTask: OpsTask | null = null;
-  let settledReconfirm: string | null = null;
+  let settledReconfirm: { request: string; engineActions?: string[] } | null = null;
   // A no that just dropped the parked action. It is the turn's own cancel, done before the model's
   // calls run, so it is a result like any other: a cancel_research the model wrote beside it then
   // reads as a second drop of the same thing (alreadyCancelled), and her "dropped it" is backed.
@@ -4159,7 +4208,12 @@ export async function processConvoResult(args: {
     // the salvage below keeps the holding half.
     effects.modelDelegated = true;
   }
-  if (settledReconfirm && !effects.parkedApproval) effects.parkedApproval = { request: settledReconfirm, variant: 'reconfirm' };
+  if (settledReconfirm && !effects.parkedApproval) {
+    effects.parkedApproval = {
+      request: settledReconfirm.request, variant: 'reconfirm',
+      ...(settledReconfirm.engineActions ? { engineActions: settledReconfirm.engineActions } : {}),
+    };
+  }
   // A no seeds the drop it made, ahead of the model's own calls, so a cancel of the same action
   // later in the turn reads as already done rather than as nothing found.
   if (settledDecline && settledDeclineRef && !effects.cancelled.some(c => c.id === settledDeclineRef!.id)) {
@@ -4269,7 +4323,7 @@ export async function processConvoResult(args: {
   // code line is asked directly: that pass is already the turn's last model call.
   if (effects.parkedApproval) {
     textParts.length = 0;
-    textParts.push(await askForApproval(args.outcomePass ? { ...args, turn: undefined } : args, effects.parkedApproval.request, guardToolCalls, effects.parkedApproval.variant, budget));
+    textParts.push(await askForApproval(args.outcomePass ? { ...args, turn: undefined } : args, effects.parkedApproval, guardToolCalls, budget));
     // The shipped text is no longer this parse's text, so this parse's bubble cap is not the cap to
     // report (same rule as every other branch that replaces the reply).
     hardCapped = false;
