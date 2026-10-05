@@ -13,7 +13,7 @@ import {
   approvalAskFallback, classifySideEffect, coerceEffect, opsApprovalGateEnabled, renderApprovalAsk,
   reconfirmAskFallback, renderReconfirmAsk,
 } from '../ops/sideEffects.js';
-import { readTaint, judgeHostSetup, gateReasons, type GateReason } from '../ops/riskGate.js';
+import { readTaint, judgeHostSetup, judgeSetupInAsk, gateReasons, type GateReason } from '../ops/riskGate.js';
 import { resolveConsent } from '../ops/consent.js';
 import {
   getOpsTask, insertPendingApproval, listPendingApprovals, promoteToRunning, settleOpsTask,
@@ -2863,8 +2863,12 @@ async function askForApproval(
     }
   }
   // They approve what they can see: a link the engine would pull from has to be on their screen
-  // exactly as written, or the code line (which carries it) goes instead.
-  const links = (parked.engineActions ?? [])
+  // exactly as written, or the code line (which carries it) goes instead. A setup left inside the
+  // request pulls from the request's links.
+  const linkSources = parked.engineActions?.length
+    ? parked.engineActions
+    : parked.reasons?.includes('host_setup') ? [parked.request] : [];
+  const links = linkSources
     .flatMap(act => act.match(/https?:\/\/\S+/gi) ?? [])
     .map(link => link.replace(/[.,;:!?)\]]+$/, ''));
   if (asked && links.some(link => !asked!.includes(link))) {
@@ -3749,13 +3753,16 @@ async function dispatchToolCalls(calls: LlmToolCall[], effects: TurnEffects, ctx
       if (opsApprovalGateEnabled()) {
         // Three reasons to wait for their yes (agents/ops/riskGate.ts): the engine would act on
         // something of theirs; an engine action would bring code onto their machine or run it there;
-        // or an engine action is proposed while text from outside is in her context. The two newer
-        // reads run only when there is an engine action to read, so a plain look pays for neither.
+        // or an engine action is proposed while text from outside is in her context. The taint and
+        // action reads run only when there is an engine action to read. A setup she left inside the
+        // request or the brief instead reaches the engine all the same, so those are read for one
+        // too, at no cost unless a setup verb is in them.
         const taint: { tainted: boolean; from?: string } = engineActions.length
           ? await readTaint(chatContext.senderHandle)
           : { tainted: false };
         const host = engineActions.length ? await judgeHostSetup(engineActions) : { risky: false };
-        const reasons = gateReasons({ effect: built.effect, engineActions, hostSetup: host.risky, tainted: taint.tainted });
+        const askSetup = host.risky ? { risky: false } : await judgeSetupInAsk([opsRequest, metaPrompt]);
+        const reasons = gateReasons({ effect: built.effect, engineActions, hostSetup: host.risky || askSetup.risky, tainted: taint.tainted });
         if (reasons.length) {
           await parkForApproval(built, {
             chatId, handle, sender: chatContext.senderHandle, reasons,

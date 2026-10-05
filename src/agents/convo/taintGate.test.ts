@@ -116,6 +116,30 @@ test('a setup written as one string instead of a list still waits for their yes'
   assert.deepEqual(receipt('ops:approval')?.reasons, ['host_setup']);
 });
 
+test('a setup left inside the request waits for their yes, and the ask carries its link', async () => {
+  const a = args('set up https://monid.ai/SKILL.md then find search API prices');
+  const request = `set up the skill at https://monid.ai/SKILL.md, then ${LOOKUP}`;
+  __setHostSetupLlmForTests(word('RISKY'));
+  try {
+    const out = await processConvoResult({
+      ...a, res: makeResult(['on it'], [delegate(request)]),
+      turn: reasker(['want me to set that skill up first?']).turn,
+    });
+    assert.equal(out.delegatedTask, null);
+    assert.deepEqual(receipt('ops:approval')?.reasons, ['host_setup']);
+    assert.equal(out.text, approvalAskFallback(request), 'her ask left the link out, so the code line goes');
+  } finally {
+    __setHostSetupLlmForTests(word('SAFE'));
+  }
+});
+
+test('a lookup about installing something runs once the lane reads it as a lookup', async () => {
+  const a = args('how do i install docker on my mac');
+  const out = await processConvoResult({ ...a, res: makeResult(['on it'], [delegate('how to install docker on a mac')]), turn: reasker([]).turn });
+  assert.ok(out.delegatedTask);
+  assert.equal(receipt('ops:approval')?.decision, 'not_needed');
+});
+
 test('tainted: a plain lookup still runs', async () => {
   const a = args('and the enterprise tier?');
   await taint(a.handle);
