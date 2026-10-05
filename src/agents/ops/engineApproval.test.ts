@@ -122,7 +122,7 @@ test('a yes that cannot reach the engine keeps the ask and says the go-ahead did
   await armEngineApproval(t, REQ, quiet, 'hermes');
   const out = await withEngine('failed', [], () => waitingOn(REQ, () => resolveEngineApproval(reply(t, 'yes'))));
   assert.equal(out.result?.status, 'unavailable', 'never an outcome-pass status: there is nothing a second draft could fix');
-  assert.match(out.result!.detail, /did not reach the engine/);
+  assert.match(out.result!.detail, /did not reach their hermes/);
   assert.equal(await engineApprovalWaiting(t.agentHandle), true, 'their next yes can try again');
 });
 

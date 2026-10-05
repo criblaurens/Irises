@@ -1879,7 +1879,7 @@ export function buildSystemPromptSections(
   // The back-off's one ask (memory/proactiveBackoff.ts) is still open. Like unsend, its tool lives far
   // back in the system message, so the edge says what to do with the answer.
   if (liveState?.checkinAwaiting) {
-    push('checkin', '## Your last text asked whether they still want you texting first\nRead whether this message answers it. A clear no: call `set_preference` key="texts_first" value=false and leave it there, no pushback and no making it about you. A clear yes, or a message about something else: save nothing and answer what they said. Never ask it again.');
+    push('checkin', '## A recent text of yours asked whether they still want you texting first\nRead whether this message answers it. A clear no: call `set_preference` key="texts_first" value=false and leave it there, no pushback and no making it about you. A clear yes, or a message about something else: save nothing and answer what they said. Do not ask it again yourself.');
   }
 
   if (extraSection) push('extra', extraSection);

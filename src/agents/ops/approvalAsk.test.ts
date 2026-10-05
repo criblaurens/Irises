@@ -20,7 +20,7 @@ test('a setup ask names every action and why it waits, and the code line carries
   assert.match(note, /and first have it install https:\/\/monid\.ai\/SKILL\.md\./);
   assert.match(note, /brings new code onto their machine or runs it there/);
   assert.match(note, /right after you read material from outside \(for "read monid\.ai"\)/);
-  assert.match(note, /naming exactly what it would set up and any link exactly as written/);
+  assert.match(note, /name what it would set up, with any link exactly as written/);
   assert.match(approvalAskFallback('find search API prices', ['install https://monid.ai/SKILL.md']),
     /\(first: install https:\/\/monid\.ai\/SKILL\.md\)\? say go and i go$/);
 });

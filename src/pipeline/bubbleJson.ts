@@ -138,7 +138,7 @@ export const FOLLOW_UP_ENVELOPE_SCHEMA: Record<string, unknown> = {
   properties: {
     confidence_level: (BUBBLE_ENVELOPE_SCHEMA.properties as Record<string, unknown>).confidence_level,
     bubbles: (BUBBLE_ENVELOPE_SCHEMA.properties as Record<string, unknown>).bubbles,
-    offered_follow_up: { type: 'boolean', description: 'true only when your last item offers to also take the next step your brief names, as one yes/no question; false otherwise' },
+    offered_follow_up: { type: 'boolean', description: 'true only when your last item offers them the next step your brief names, as one yes/no question; false otherwise' },
     status: STATUS_SCHEMA_PROP,
   },
 };

@@ -265,7 +265,7 @@ export async function resolveEngineApproval(
     const yes = explicitGo && (await resolveConsent(a.text, action)) === 'yes';
     rec({ decision: a.chatId !== m.chatId ? 'other_chat' : 'predates_ask', state, yes });
     return yes
-      ? { ...NOTHING, note: { tool: 'engine_approval', status: 'unavailable', target: oneLine(m.command).slice(0, 80), detail: `that yes did not clear the step (${elsewhere}); the step is still waiting on a yes to the ask itself` } }
+      ? { ...NOTHING, note: { tool: 'engine_approval', status: 'unavailable', target: oneLine(m.command).slice(0, 80), detail: `that yes did not count for the step (${elsewhere}); the step is still waiting on a yes to the ask itself` } }
       : NOTHING;
   }
   // With an explicit go the full reading runs as ever, negation included ("don't go ahead" is a no).
@@ -285,7 +285,7 @@ export async function resolveEngineApproval(
     await dropMarker(a.sender, m);
     if (state === 'timed_out') {
       rec({ decision: 'declined', state });
-      return { result: { tool: 'engine_approval', status: 'done', target, detail: 'they let the skipped step go; it never ran and nothing more will run for it' }, rerun: null };
+      return { result: { tool: 'engine_approval', status: 'done', target, detail: 'they let the skipped step go: it never ran, and nothing runs for it now' }, rerun: null };
     }
     const outcome = await answer(m.handle, 'deny');
     rec({ decision: 'declined', state, outcome });
@@ -303,14 +303,14 @@ export async function resolveEngineApproval(
     }
     if (outcome === 'failed') {
       rec({ decision: 'approved', outcome });
-      return { result: { tool: 'engine_approval', status: 'unavailable', target, detail: 'the go-ahead did not reach the engine, so the step is still waiting on it', nextStep: 'their next yes tries again' }, rerun: null };
+      return { result: { tool: 'engine_approval', status: 'unavailable', target, detail: `the go-ahead did not reach their ${m.handle.engine}, so the step is still waiting on it`, nextStep: 'their next yes tries again' }, rerun: null };
     }
     // 'not_pending': it stopped waiting before the yes landed, which makes this a late yes.
   }
   await dropMarker(a.sender, m);
   const rerun = lateRerun(m, a.sender, now);
   rec({ decision: 'late_yes', state, rerunId: rerun.id, ...(state === 'live' && !bound ? { unbound: true } : {}) });
-  return { result: { tool: 'engine_approval', status: 'done', target, detail: 'that step had stopped waiting, so it is starting again as a fresh run of just that step' }, rerun };
+  return { result: { tool: 'engine_approval', status: 'done', target, detail: `their ${m.handle.engine} had stopped waiting on that step, so it starts again now as a fresh run of just that step` }, rerun };
 }
 
 export interface EngineApprovalRelay {

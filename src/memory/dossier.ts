@@ -164,7 +164,7 @@ export function renderPendingApproval(pa: PendingApprovalCtx, nowMs: number): st
   // reads as what it was. The act wording is byte for byte what it always was.
   const offer = pa.origin === 'follow_up';
   const opening = offer
-    ? '## You offered them a next step (their next reply is probably the answer)\nYou offered to also do: '
+    ? '## You offered them a next step (their next reply is probably the answer)\nWhat you offered: '
     : '## You asked them to approve an action (their next reply is probably the answer)\nYou asked whether to go ahead with: ';
   return `${opening}${ref}"${pa.request}"${when}. It has NOT started, and will not until they say yes — never speak about it as if it were running.\nIf they say yes, it starts as this turn ends: one short line that you are doing it. If they say no, let it go in one line. If they reply about something else, answer that normally — the ${offer ? 'offer' : 'ask'} stays open until they settle it.`;
 }
@@ -211,11 +211,11 @@ export function renderPendingEngineApproval(m: PendingEngineApprovalCtx, state: 
   const step = `${m.description ? `${oneLine(m.description)}, ` : ''}running: ${oneLine(m.command ?? '')}`;
   const both = competing ? `\nBoth this step and "${competing}" are waiting on their yes. A bare yes could mean either and runs nothing, so ask them which one they mean, naming each.` : '';
   if (state === 'timed_out') {
-    return `## A step of your look was skipped while it waited on their OK\nWhile looking into "${m.request}", their ${engine} stopped before one step and waited for their word: ${step}. No answer came in time, so that step did not run.\nA yes from them still gets it done, as a fresh run of that step. A no lets it go. A reply that is not a clear yes or no to this step runs nothing; when theirs leaves it unsettled, ask them plainly whether it should run. If they reply about something else, answer that normally.${both}`;
+    return `## A step of your look was skipped while it waited on their OK\nWhile looking into "${m.request}", their ${engine} stopped before one step and waited for their word: ${step}. No answer came in time, so that step did not run.\nA yes from them still gets it done, as a fresh run of that step. A no lets it go. A reply that is not a clear yes or no to this step runs nothing: ask them plainly whether it should run. If they reply about something else, answer that normally.${both}`;
   }
   const ago = formatAgo(typeof m.askedAt === 'number' ? Math.floor(m.askedAt / 1000) : undefined, nowMs);
   const when = ago ? ` (asked ${ago})` : '';
-  return `## Their ${engine} paused your look on a step that needs their OK (their next reply is probably the answer)\nWhile looking into "${m.request}", their ${engine} stopped before this step and is waiting for their word${when}: ${step}. Nothing of that step runs until they answer.\nA yes lets that one step run. A no refuses it, and when their no names another way to do it, steer the running look with that way (steer_research). A reply that is not a clear yes or no to this step runs nothing; when theirs leaves it unsettled, ask them plainly whether it should run. If they reply about something else, answer that normally; the step keeps waiting.${both}`;
+  return `## Their ${engine} paused your look on a step that needs their OK (their next reply is probably the answer)\nWhile looking into "${m.request}", their ${engine} stopped before this step and is waiting for their word${when}: ${step}. Nothing of that step runs until they answer.\nA yes lets that one step run. A no refuses it; when the no names another way to do it, steer the running look with that way (steer_research). A reply that is not a clear yes or no to this step runs nothing: ask them plainly whether it should run. If they reply about something else, answer that normally; the step keeps waiting.${both}`;
 }
 
 interface PendingEmailContext {

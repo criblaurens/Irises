@@ -11,7 +11,7 @@ test('the turn after an unanswered check-in carries the edge section, and only t
   const tools = convoToolList({ engineName: 'hermes', isGroupChat: false });
   const build = (checkinAwaiting: boolean) => buildSystemPromptSections(undefined, '', [], undefined, tools, [], 'x', undefined, undefined, undefined, null, undefined, undefined, undefined, undefined, undefined, undefined, { checkinAwaiting });
   const on = build(true);
-  assert.match(on.tail, /## Your last text asked whether they still want you texting first/);
+  assert.match(on.tail, /## A recent text of yours asked whether they still want you texting first/);
   assert.match(on.tail, /set_preference/);
   assert.match(on.tail, /texts_first/);
   assert.doesNotMatch(on.system, /still want you texting first/, 'never in the cached system message');

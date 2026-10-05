@@ -185,7 +185,7 @@ export function skippedStepRelay(step: { command: string; description: string } 
   if (!step || asksToNarrow(moment, giveUp)) return '';
   const flat = (s: string) => s.replace(/\s*[\r\n]+\s*/g, ' / ');
   const what = step.description ? `${flat(step.description)} (${flat(step.command)})` : flat(step.command);
-  return `\n\none step of this look waited on their OK and ran out of time, so it was skipped and did not run: ${what}. say so in one plain clause as part of what you send. their yes still gets that step done as a fresh run: say that once, and leave the choice with them.`;
+  return `\n\none step of this look waited on their OK and ran out of time, so it was skipped and did not run: ${what}. say so in one plain clause inside what you send, and say once that a yes from them still gets that step done as a fresh run; the choice stays with them.`;
 }
 
 /**
@@ -218,7 +218,7 @@ export const VIEW_EDGE = "before you send: you read this before texting them abo
  */
 export function nextStepClause(next?: string): string {
   return next
-    ? `one step could come next that this look did not take: "${next}". offering it is your call: offer it only when you judge it helps them with what they're doing right now, as one yes/no question in your last bubble, in your own mood; otherwise leave it out`
+    ? `one step could come next that this look did not take: ${next}. offering it is your call: offer it only when you judge it helps them with what they're doing right now, as one yes/no question in your last bubble, in your own mood; otherwise leave it out`
     : 'never a "want me to?" question';
 }
 

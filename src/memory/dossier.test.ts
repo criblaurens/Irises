@@ -963,7 +963,7 @@ test('renderPendingApproval words an offer she made as her offer, and it has sti
   const pa = { taskId: 't-2', request: 'hold the 9am fare for them', kind: 'general', askedAt: now - 60_000 };
   const offer = renderPendingApproval({ ...pa, origin: 'follow_up' }, now);
   assert.match(offer, /^## You offered them a next step/);
-  assert.match(offer, /You offered to also do: \[A[0-9a-z]+\] "hold the 9am fare for them"/);
+  assert.match(offer, /What you offered: \[A[0-9a-z]+\] "hold the 9am fare for them"/);
   assert.match(offer, /has NOT started/);
   assert.match(offer, /the offer stays open until they settle it\.$/);
   assert.ok(offer.length < renderPendingApproval(pa, now).length, 'never wider than the act wording the budget fixture carries');

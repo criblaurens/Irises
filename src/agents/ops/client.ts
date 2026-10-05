@@ -53,7 +53,7 @@ const OUTPUT_CONTRACT = [
   'NOTICED: <what stood out to you while finding it, the context that gives the answer its meaning: how it compares with what is usual, what is unusual or changing, the catch, the reason behind it. Only what you already saw on the way, never an extra lookup for it; every figure in it exact. "none" when nothing stood out>',
   'SOURCE: <where each hard fact came from (a page, a message, a file)>',
   'ACTIONS: <only when you DID something beyond reading — code run over what data, an artifact produced, a follow-up you scheduled and its fire time; required whenever the brief listed required actions, one report per item including any you could not do. Omit this line entirely when there is nothing to report.>',
-  'NEXT: <the one concrete step you could take next toward what they want that this run did not take — only when one is plainly worth it; omit the line otherwise. A statement of the step, never a question.>',
+  'NEXT: <the one concrete step toward what they want that this run did not take, only when one is plainly worth taking; omit the line otherwise. A statement of the step, never a question or an offer.>',
   'FLAGS: <caveats or uncertainty, or "none">',
   'If you found nothing usable, the ANSWER line must start with exactly "NO RESULT:" followed by one honest sentence about what you tried.',
 ].join('\n');

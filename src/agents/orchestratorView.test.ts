@@ -38,7 +38,7 @@ test('an ending that asks them to narrow carries no skipped step; a give-up stil
 test('with no next step the answer keeps its standing rule; with one, offering it is her call', () => {
   assert.equal(nextStepClause(), 'never a "want me to?" question', 'byte for byte what the answer said before');
   const clause = nextStepClause('hold the 9am fare for them');
-  assert.match(clause, /"hold the 9am fare for them"/);
+  assert.match(clause, /did not take: hold the 9am fare for them\. offering/, 'the step rides unquoted, so a quote inside it breaks nothing');
   assert.match(clause, /offering it is your call/);
   assert.match(clause, /one yes\/no question in your last bubble/);
   assert.match(clause, /otherwise leave it out/);
