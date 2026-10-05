@@ -18,7 +18,7 @@
 import { callLLM } from '../../llm/callLLM.js';
 import { wrapPrompt, dataTag } from '../../llm/promptTag.js';
 import { reportError } from '../../diagnostics/errorLog.js';
-import { latestShortTerm } from '../../db/repositories/memoryShort.js';
+import { latestShortTermStrict, type ShortKind, type ShortTermEntry } from '../../db/repositories/memoryShort.js';
 import { RECENT_RESEARCH_TTL_MS } from '../../memory/shortTerm.js';
 import type { SideEffect } from './sideEffects.js';
 
@@ -113,11 +113,16 @@ export function gateReasons(v: {
  * Is text from outside in her context right now? True while an engine or media result was
  * delivered inside the recent-research window, which is exactly how long its full text sits in
  * her prompt (memory/shortTerm.ts). `from` is the ask that produced it, for the receipt and the
- * ask's wording. A failed read is tainted: the cost is one extra question.
+ * ask's wording. A failed read is tainted: the cost is one extra question. That is why it reads
+ * through the strict (throwing) query: the everyday one degrades a DB error to "nothing there".
  */
-export async function readTaint(handle: string, now: number = Date.now()): Promise<{ tainted: boolean; from?: string }> {
+export async function readTaint(
+  handle: string,
+  now: number = Date.now(),
+  deps: { latest?: (h: string, k: ShortKind[]) => ShortTermEntry | null | Promise<ShortTermEntry | null> } = {},
+): Promise<{ tainted: boolean; from?: string }> {
   try {
-    const latest = await latestShortTerm(handle, ['ops_research', 'media_analysis']);
+    const latest = await (deps.latest ?? latestShortTermStrict)(handle, ['ops_research', 'media_analysis']);
     if (latest && now - latest.createdAt <= RECENT_RESEARCH_TTL_MS) {
       return latest.request ? { tainted: true, from: latest.request } : { tainted: true };
     }

@@ -54,3 +54,8 @@ test('a look delivered inside the recent-research window taints, and it wears of
   assert.deepEqual(await readTaint(handle), { tainted: true, from: 'what does this page say' });
   assert.deepEqual(await readTaint(handle, Date.now() + RECENT_RESEARCH_TTL_MS + 1), { tainted: false });
 });
+
+test('a failed read is tainted', async () => {
+  const broken = () => { throw new Error('db down'); };
+  assert.deepEqual(await readTaint('+15559310999', Date.now(), { latest: broken }), { tainted: true });
+});
