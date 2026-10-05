@@ -2864,10 +2864,8 @@ async function askForApproval(
   }
   // They approve what they can see: a link the engine would pull from has to be on their screen
   // exactly as written, or the code line (which carries it) goes instead. A setup left inside the
-  // request pulls from the request's links.
-  const linkSources = parked.engineActions?.length
-    ? parked.engineActions
-    : parked.reasons?.includes('host_setup') ? [parked.request] : [];
+  // request pulls from the request's links too.
+  const linkSources = [...(parked.engineActions ?? []), ...(parked.reasons?.includes('host_setup') ? [parked.request] : [])];
   const links = linkSources
     .flatMap(act => act.match(/https?:\/\/\S+/gi) ?? [])
     .map(link => link.replace(/[.,;:!?)\]]+$/, ''));
@@ -3876,7 +3874,27 @@ async function dispatchToolCalls(calls: LlmToolCall[], effects: TurnEffects, ctx
           }
         }
       }
-      const steered = steerResearch(String(input.id ?? '').trim(), String(input.match ?? ''), String(input.guidance ?? ''), chatId, handle ?? '', getEngineBackend(), mandated);
+      // Guidance that carries a setup itself, with no action split out, would reach the running look
+      // as words, so it is read the way a delegation's request is, and a setup in it is parked as a
+      // look of its own instead of being sent.
+      let withheld = false;
+      if (!steerActions.length && opsApprovalGateEnabled() && chatContext?.senderHandle) {
+        const guidance = String(input.guidance ?? '').trim();
+        if (guidance && (await judgeSetupInAsk([guidance])).risky) {
+          withheld = true;
+          const effect = classifySideEffect(guidance, 'read').effect;
+          if (!effects.parkedApproval && !effects.delegatedTask) {
+            await parkForApproval({
+              id: randomUUID(), chatId, agentHandle: chatContext.senderHandle, kind: 'general',
+              request: guidance, effect, createdAt: Date.now(), media: emptyMedia(),
+              ...(chatContext.isGroupChat ? { room: true } : {}),
+            }, { chatId, handle, sender: chatContext.senderHandle, reasons: gateReasons({ effect, engineActions: [], hostSetup: true, tainted: false }), trigger: 'steer', effects });
+          } else {
+            console.warn(`[convo] dropped a steer whose words carry a setup; a park or a look already stands this turn (chat ${chatId})`);
+          }
+        }
+      }
+      const steered = withheld ? null : steerResearch(String(input.id ?? '').trim(), String(input.match ?? ''), String(input.guidance ?? ''), chatId, handle ?? '', getEngineBackend(), mandated);
       if (steered) effects.results.push(steered);
     } else if (call.name === 'recall_memory') {
       // Just captured here — the search + the answer happen in one bounded second pass after
@@ -4747,6 +4765,20 @@ export async function processConvoResult(args: {
   // her answer, not a fabrication, and forcing the look behind it would ship her no and the result
   // side by side.
   const moodDeclined = routingGateStandsDown(reply.statusRaw);
+
+  // A floor pushes the user's own words in as the request, and the brief it writes grants setup, so
+  // a setup in those words would reach the engine with no yes. Their words are read like any
+  // delegation's request (riskGate.ts judgeSetupInAsk), never the floor's brief, and a setup parks
+  // the floor's task behind the same ask, rendered here because the floors run after the ask above.
+  const parkedForcedSetup = async (task: OpsTask): Promise<boolean> => {
+    if (!opsApprovalGateEnabled() || !chatContext?.senderHandle) return false;
+    if (!(await judgeSetupInAsk([task.request])).risky) return false;
+    await parkForApproval(task, { chatId, handle, sender: chatContext.senderHandle, reasons: ['host_setup'], trigger: 'floor', effects });
+    textParts.length = 0;
+    textParts.push(await askForApproval(args.outcomePass ? { ...args, turn: undefined } : args, effects.parkedApproval!, guardToolCalls, budget));
+    hardCapped = false;
+    return true;
+  };
   if (process.env.ROUTING_GATE !== 'off' && !effects.delegatedTask && !effects.suppressedDuplicate && !effects.parkedApproval
       && !moodDeclined
       && effects.results.length === 0
@@ -4802,7 +4834,7 @@ export async function processConvoResult(args: {
         // dana is this?" from the engine a minute later. Beside the brief, not inside it — the gate's
         // own brief stays byte-identical, and her memory stays off the walled-URL scan surface.
         const held = heldForOps(turnHits);
-        effects.delegatedTask = buildForcedTask({
+        const forced = buildForcedTask({
           chatId, agentHandle: chatContext.senderHandle, request: lastUser,
           metaPrompt: `The user asked: "${lastUser}". This needs real, grounded data (the web, their own email, or their own past chats) — do NOT answer from general knowledge. Use the right tools and return only grounded facts; if you can't find it, say so.`,
           heldMemory: held.block || undefined,
@@ -4810,19 +4842,24 @@ export async function processConvoResult(args: {
           originConfidence: reply.confidenceLevel,
           memoryHits: held.count,
         });
-        // Keep Irises's own words wherever they're safe: the draft's first holding beat ("lemme check
-        // your records for martinez", a bare "hmm") survives as the holding text — the rest of the
-        // draft, un-grounded tail and all, is discarded. When the draft has no safe beat, the voiced
-        // instant holding line below takes over as before. lastUser is the ground:
-        // figures the user said themselves may echo in the holding line.
-        const salvaged = salvageHoldingText(normalizedText, lastUser);
-        textParts.length = 0;
-        if (salvaged) textParts.push(salvaged);
-        salvagedDraft = !!salvaged;
-        decision = 'delegated';
-        // chatId rides along so a live round can attribute this line to the chat it fired on — the
-        // battery harness reads it back per-chat when the trace buffer isn't reachable.
-        console.log(`[convo] routing gate forced delegation for a grounded query (chat ${chatId})${salvaged ? ' (kept the draft’s own holding opener)' : ''}`);
+        if (await parkedForcedSetup(forced)) {
+          decision = 'delegated';
+        } else {
+          effects.delegatedTask = forced;
+          // Keep Irises's own words wherever they're safe: the draft's first holding beat ("lemme check
+          // your records for martinez", a bare "hmm") survives as the holding text — the rest of the
+          // draft, un-grounded tail and all, is discarded. When the draft has no safe beat, the voiced
+          // instant holding line below takes over as before. lastUser is the ground:
+          // figures the user said themselves may echo in the holding line.
+          const salvaged = salvageHoldingText(normalizedText, lastUser);
+          textParts.length = 0;
+          if (salvaged) textParts.push(salvaged);
+          salvagedDraft = !!salvaged;
+          decision = 'delegated';
+          // chatId rides along so a live round can attribute this line to the chat it fired on — the
+          // battery harness reads it back per-chat when the trace buffer isn't reachable.
+          console.log(`[convo] routing gate forced delegation for a grounded query (chat ${chatId})${salvaged ? ' (kept the draft’s own holding opener)' : ''}`);
+        }
       }
     }
     routingGate = decision;
@@ -4854,7 +4891,7 @@ export async function processConvoResult(args: {
   //   • PLUS the capability intersection: only classes the engine can ACTUALLY do. An honest refusal
   //     (engine off, inbox genuinely not connected, null summary) survives untouched — this floor
   //     exists to stop lies, never to force a promise the deployment can't keep.
-  if (process.env.REFUSAL_FLOOR !== 'off' && !effects.delegatedTask && !effects.suppressedDuplicate
+  if (process.env.REFUSAL_FLOOR !== 'off' && !effects.delegatedTask && !effects.suppressedDuplicate && !effects.parkedApproval
       && !moodDeclined
       && effects.results.length === 0
       && !args.archivePass && !args.outcomePass
@@ -4867,7 +4904,7 @@ export async function processConvoResult(args: {
       // Same kind-agnostic dedup pair as the gate: never stack a forced task on a run already going.
       if (falsely.length && !hasInFlightRequest(chatId, ask)
           && isDuplicateDelegation(chatId, 'general', ask) !== 'in_flight') {
-        effects.delegatedTask = buildForcedTask({
+        const forced = buildForcedTask({
           chatId, agentHandle: chatContext.senderHandle, request: ask,
           // "set up" as well as "found": the same false refusal covers an ask to prepare the engine's
           // own side, and a brief that only asks for findings invites the setup half to be skipped.
@@ -4875,13 +4912,18 @@ export async function processConvoResult(args: {
           replyToMessageId: chatContext?.incomingMessageId,
           originConfidence: reply.confidenceLevel,
         });
-        // A PURE refusal bubble salvages nothing (it neither holds the line nor acks), so the voiced
-        // holding path below takes over — which is the common case here and the intended one.
-        const salvaged = salvageHoldingText(normalizedText, ask);
-        textParts.length = 0;
-        if (salvaged) textParts.push(salvaged);
-        console.warn(`[convo] false-refusal floor forced delegation (chat ${chatId}) — refused ${falsely.join(',')}${salvaged ? '; kept the draft’s own holding opener' : ''}`);
-        record({ type: 'event', label: 'convo:false_refusal', chatId, handle, detail: { classes: falsely, salvaged: !!salvaged } });
+        if (await parkedForcedSetup(forced)) {
+          record({ type: 'event', label: 'convo:false_refusal', chatId, handle, detail: { classes: falsely, parked: true } });
+        } else {
+          effects.delegatedTask = forced;
+          // A PURE refusal bubble salvages nothing (it neither holds the line nor acks), so the voiced
+          // holding path below takes over — which is the common case here and the intended one.
+          const salvaged = salvageHoldingText(normalizedText, ask);
+          textParts.length = 0;
+          if (salvaged) textParts.push(salvaged);
+          console.warn(`[convo] false-refusal floor forced delegation (chat ${chatId}) — refused ${falsely.join(',')}${salvaged ? '; kept the draft’s own holding opener' : ''}`);
+          record({ type: 'event', label: 'convo:false_refusal', chatId, handle, detail: { classes: falsely, salvaged: !!salvaged } });
+        }
       }
     }
   }

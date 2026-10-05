@@ -25,6 +25,10 @@ import { emptyMedia } from '../../webhook/types.js';
 import { __resetOpsCoordination } from '../../state/opsCoordination.js';
 import { resetEngineBackendCache, type EngineBackend, type CapabilityClass } from '../ops/engineBackend.js';
 import type { LlmResult } from '../../llm/types.js';
+import { __setHostSetupLlmForTests } from '../ops/riskGate.js';
+
+// The setup screen's classify lane (ops/riskGate.ts judgeSetupInAsk) reads these asks as the lookups they are.
+__setHostSetupLlmForTests(async () => ({ text: 'SAFE', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' }));
 
 // A gate-'no' ask about the user's own disk: no named path and no inspection verb, so nothing above
 // the floor claims it. This is exactly the shape that shipped the live refusal.
