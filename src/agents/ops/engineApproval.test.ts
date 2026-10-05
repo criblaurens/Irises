@@ -528,7 +528,7 @@ test('a run that ends with its ask still live leaves it as a skipped step, for t
   assert.equal(m?.timedOut, true, 'as a skipped step');
 });
 
-test('a look that ends on a needs_info question leaves no step their answer to it could run', async () => {
+test('a look that ends by asking them to narrow leaves no step their answer could run', async () => {
   const live = mkTask();
   await armEngineApproval(live, REQ, quiet, 'hermes');
   await settleLookEngineAsk(live, 'needs_info');
@@ -538,6 +538,15 @@ test('a look that ends on a needs_info question leaves no step their answer to i
   await markEngineApprovalTimedOut(skipped.agentHandle, REQ.handle.runId);
   await settleLookEngineAsk(skipped, 'needs_info');
   assert.equal(await getPreference(skipped.agentHandle, ENGINE_APPROVAL_PREF), null, 'and so does a skipped one: nothing promised it');
+  const steered = mkTask();
+  await armEngineApproval(steered, REQ, quiet, 'hermes');
+  await settleLookEngineAsk(steered, 'miss');
+  assert.equal(await getPreference(steered.agentHandle, ENGINE_APPROVAL_PREF), null, 'a miss that asks them to narrow is a question too');
+  const gaveUp = mkTask();
+  await armEngineApproval(gaveUp, REQ, quiet, 'hermes');
+  await settleLookEngineAsk(gaveUp, 'miss', true);
+  const kept = await getPreference<{ taskId: string; timedOut?: boolean }>(gaveUp.agentHandle, ENGINE_APPROVAL_PREF);
+  assert.equal(kept?.timedOut, true, 'a give-up asks nothing, so its step stays for the late yes it tells them of');
 });
 
 test('a relay step that fails says so in the log', async () => {

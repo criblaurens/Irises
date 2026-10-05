@@ -163,17 +163,24 @@ export function steerRelay(unapplied: readonly string[], moment: ComposeMoment):
   return `\n\nwhile you were looking they also added: ${said}. the look already under way could not take that in, so what came back may not cover it. never word the answer as if it does, and if it doesn't cover it, say so in one flat clause.`;
 }
 
+/** Does the look end by asking them to narrow it: a needs_info question, or a miss's steering
+ *  question (a give-up miss asks none)? The two-strike marker, the skipped-step clause and the
+ *  standing step all read this one answer. */
+function asksToNarrow(moment: ComposeMoment | undefined, giveUp: boolean): boolean {
+  return moment === 'needs_info' || (moment === 'miss' && !giveUp);
+}
+
 /**
  * The clause for a step this look skipped while it waited on their OK (ops/engineApproval.ts): the
  * engine asked, nobody answered in time, and the step did not run. A fact to relay, never her call:
  * she already asked. Their yes still gets it done as a fresh run, which is why they must hear it was
- * skipped. '' on every look that skipped nothing, and on a needs_info question, which asks for one
- * thing and names no process. The command and description are the engine's own text, so each is
- * flattened to one line here: a newline in either could pass for a prompt heading. Pure; exported
- * for the pin test.
+ * skipped. '' on every look that skipped nothing, and on an ending that asks them to narrow
+ * (asksToNarrow): their answer is to her question, so the step is neither named nor kept. The
+ * command and description are the engine's own text, so each is flattened to one line here: a
+ * newline in either could pass for a prompt heading. Pure; exported for the pin test.
  */
-export function skippedStepRelay(step: { command: string; description: string } | null, moment: ComposeMoment): string {
-  if (!step || moment === 'needs_info') return '';
+export function skippedStepRelay(step: { command: string; description: string } | null, moment: ComposeMoment, giveUp = false): string {
+  if (!step || asksToNarrow(moment, giveUp)) return '';
   const flat = (s: string) => s.replace(/\s*[\r\n]+\s*/g, ' / ');
   const what = step.description ? `${flat(step.description)} (${flat(step.command)})` : flat(step.command);
   return `\n\none step of this look waited on their OK and ran out of time, so it was skipped and did not run: ${what}. say so in one plain clause as part of what you send. their yes still gets that step done as a fresh run: say that once, and leave the choice with them.`;
@@ -183,12 +190,12 @@ export function skippedStepRelay(step: { command: string; description: string } 
  * What the end of a look does with an engine ask of its own still standing on their prefs. A live
  * one is a skipped step (its 'expired' may land a moment after the run does), the same reading the
  * answer's composer took (skippedEngineStep), so it stays, flagged, for the late yes the answer
- * promised. Nothing promised it when they called the look off, or when the look ended on a
- * needs_info question, which names no step (skippedStepRelay): then it goes, live or skipped, so
- * their answer to her question can never run it. Exported for the test.
+ * promised. Nothing promised it when they called the look off, or when the look ended by asking
+ * them to narrow (asksToNarrow), which names no step (skippedStepRelay): then it goes, live or
+ * skipped, so their answer to her question can never run it. Exported for the test.
  */
-export function settleLookEngineAsk(task: OpsTask, end: ComposeMoment | undefined): Promise<void> {
-  return isOpsCancelled(task.chatId, task.id) || end === 'needs_info'
+export function settleLookEngineAsk(task: OpsTask, end: ComposeMoment | undefined, giveUp = false): Promise<void> {
+  return isOpsCancelled(task.chatId, task.id) || asksToNarrow(end, giveUp)
     ? clearEngineApproval(task.agentHandle, task.id, true)
     : markEngineApprovalTimedOut(task.agentHandle, { taskId: task.id });
 }
@@ -256,7 +263,7 @@ async function composeFollowUp(
   // And what they ADDED mid-run that the look never took in. Empty on almost every run.
   instruction += steerRelay(getUnappliedSteers(chatId, task.id), moment);
   // A step this look skipped while it waited on their OK. Empty on every look that skipped nothing.
-  instruction += skippedStepRelay(await skippedEngineStep(handle, task.id), moment);
+  instruction += skippedStepRelay(await skippedEngineStep(handle, task.id), moment, !!extras.giveUp);
 
   // Continue straight from the exact holding line Irises last sent, so the late reply reads as one
   // seamless thread, not a fresh delivery. This is a continuity anchor only — never a fact source.
@@ -445,6 +452,7 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
 
   let finalSent = false; // the double-send latch: never voice a failure after an answer already shipped
   let endMoment: ComposeMoment | undefined; // the moment the look ended on, once it is settled
+  let endGiveUp = false;
   try {
     record({
       type: 'delegation', chatId: task.chatId, handle: task.agentHandle, taskId: task.id,
@@ -639,8 +647,9 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     // Info-hole → a TARGETED question (rides the two-strike marker). ask_user is only ever returned for
     // attempt 1 (triage downgrades it to give_up on ≥2), so this only fires on a first look.
     if (triage?.action === 'ask_user' && moment === 'miss' && (task.attempt ?? 1) < 2) moment = 'needs_info';
-    endMoment = moment;
     const giveUp = triage?.action === 'give_up';
+    endMoment = moment;
+    endGiveUp = giveUp;
 
     stopAllPings(); // final result in hand — no more "still on it" before the (slower) compose+send
 
@@ -678,7 +687,7 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
       // BEAT_SECOND) is terminal, so no marker. AWAIT so the durable marker is committed BEFORE the
       // in-flight flag clears in `finally` — otherwise a fast "ok" could land in the gap and Convo
       // would re-delegate.
-      const askedToNarrow = moment === 'needs_info' || (moment === 'miss' && !giveUp);
+      const askedToNarrow = asksToNarrow(moment, giveUp);
       if (askedToNarrow && attempt < 2) {
         await setPreference(task.agentHandle, 'pending_clarification', {
           request: task.request, kind: task.kind, metaPrompt: task.metaPrompt, attempt, at: Date.now(),
@@ -774,7 +783,7 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     // way the look ended (settleLookEngineAsk).
     if (relay) {
       dropEngineAsks(task.agentHandle, task.id);
-      void settleLookEngineAsk(task, endMoment)
+      void settleLookEngineAsk(task, endMoment, endGiveUp)
         .catch(err => console.warn('[orchestrator] failed to settle the engine ask of a finished look', err));
     }
     // Clear this task's in-flight marker LAST, so it outlives the result handoff above. Per-taskId

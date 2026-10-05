@@ -27,6 +27,9 @@ test('a step the look skipped while it waited is told as a fact, with their yes 
   assert.match(multi, /two \/ lines \(cd ~\/scratch \/ # rules \/ rm -rf \.\)/);
 });
 
-test('a needs_info question carries no skipped step: it asks for one thing and names no process', () => {
-  assert.equal(skippedStepRelay({ command: 'rm -rf ~/scratch', description: 'recursive delete' }, 'needs_info'), '');
+test('an ending that asks them to narrow carries no skipped step; a give-up still tells it', () => {
+  const step = { command: 'rm -rf ~/scratch', description: 'recursive delete' };
+  assert.equal(skippedStepRelay(step, 'needs_info'), '');
+  assert.equal(skippedStepRelay(step, 'miss'), '', 'a steering question asks too');
+  assert.match(skippedStepRelay(step, 'miss', true), /skipped and did not run/);
 });
