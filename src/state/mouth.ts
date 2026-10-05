@@ -37,13 +37,17 @@ export interface SpeakOpts {
   /** App-clock instant (Date.now) the content was voiced. If Irises has spoken in this chat since,
    *  the content was voiced blind to that message — drop it rather than land it stale. */
   staleIfSpokenSince?: number;
+  /** Code-written text that has to reach them exactly as written (a command they are asked to OK):
+   *  split at newlines only, and none of the reply cleanup touches a line (markdown, dashes, spacing,
+   *  sentence splits, scaffold labels). Everything about the send itself is unchanged. */
+  verbatim?: true;
 }
 
 export type SpeakResult = 'sent' | 'dropped';
 
 export interface MouthDeps {
   /** The raw bubble sender (index.ts sendBubbles): splits nothing, paces, sends, records. */
-  sendBubbles: (chatId: string, bubbles: string[], opts: { record?: boolean; replyToFirst?: ReplyTo; paced?: boolean }) => Promise<void>;
+  sendBubbles: (chatId: string, bubbles: string[], opts: { record?: boolean; replyToFirst?: ReplyTo; paced?: boolean; verbatim?: boolean }) => Promise<void>;
   splitIntoBubbles: (text: string) => string[];
   /** When Irises last spoke in this chat (app clock), for the staleIfSpokenSince guard. */
   lastSpokenAt: (chatId: string) => number | undefined;
@@ -97,10 +101,12 @@ export function createMouth(deps: MouthDeps) {
       // The voice call was the slow part — a cancel/settle can have landed during it (dropIf), and
       // for pre-voiced content this is the moment the staleness guard actually binds.
       if (stale()) return 'dropped';
-      await deps.sendBubbles(chatId, deps.splitIntoBubbles(text), {
+      const bubbles = opts.verbatim ? text.split('\n').filter(line => line.trim()) : deps.splitIntoBubbles(text);
+      await deps.sendBubbles(chatId, bubbles, {
         record: opts.record,
         replyToFirst: opts.replyTo,
         paced: opts.paced !== false && opts.priority !== 'critical',
+        ...(opts.verbatim ? { verbatim: true } : {}),
       });
       return 'sent';
     };

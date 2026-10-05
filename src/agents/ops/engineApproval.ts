@@ -75,7 +75,7 @@ export function __setEngineApprovalBackendForTests(b: EngineBackend | null | und
 const backend = (): EngineBackend | null => (backendForTests !== undefined ? backendForTests : getEngineBackend());
 
 /** The ask, in her register: the engine is THEIRS ("your hermes"), the command sits whole on its own
- *  line (the bubble splitter breaks at newlines), and the question is the last line. It names no
+ *  line (the relay sends it verbatim, split only at newlines), and the question is the last line. It names no
  *  magic word: the consent reader takes any natural yes or no. */
 export function renderEngineApprovalAsk(req: { command: string; description: string }, engineName: string): string {
   const why = req.description ? ` (${req.description})` : '';

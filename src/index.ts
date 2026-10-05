@@ -473,6 +473,7 @@ interface SendBubbleOpts {
   record?: boolean;               // append the joined text to history (default true)
   paced?: boolean;                // simulate typing between bubbles (default true). false = send now (critical alerts)
   mayShow?: () => boolean;        // asked right before each bubble goes out; false drops it and the rest (state/liveTurn.ts)
+  verbatim?: boolean;             // code-written text shown exactly as written: only the routing-tag backstop runs (state/mouth.ts)
 }
 
 // Simulated typing time for a bubble — pure math in state/pacing.ts (floor/cap/jitter, plus the
@@ -610,7 +611,7 @@ async function sendBubbles(chatId: string, rawBubbles: string[], opts: SendBubbl
   // reply target; without it we fall back to replyToFirst.
   const prepared: { text: string; replyTo?: ReplyTo }[] = [];
   for (let i = 0; i < rawBubbles.length; i++) {
-    const text = prepareBubble(rawBubbles[i]);
+    const text = opts.verbatim ? stripReplyTag(rawBubbles[i]) : prepareBubble(rawBubbles[i]);
     if (!text) continue;
     const replyTo = opts.targets?.[i] ?? (i === 0 ? opts.replyToFirst : undefined);
     prepared.push({ text, replyTo });

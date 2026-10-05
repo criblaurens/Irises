@@ -418,7 +418,8 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
   // answer holds across every leg.
   const relay = engineApprovalRelayEnabled()
     ? createEngineApprovalRelay(task, {
-      send: (chatId, text) => sendFollowUp(chatId, text, { paced: false }),
+      // Verbatim: the command on their screen is the one the engine runs, character for character.
+      send: (chatId, text) => sendFollowUp(chatId, text, { paced: false, verbatim: true }),
       engineName: getEngineBackend()?.name ?? 'engine',
     })
     : null;

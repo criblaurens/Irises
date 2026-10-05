@@ -19,7 +19,9 @@ import { getPreference } from '../../db/repositories/memory.js';
 import { getTraces, clearTraces } from '../../diagnostics/trace.js';
 import { actionSucceeded } from '../convo/actionResults.js';
 import { runTask } from './client.js';
-import { runOpsAndFollowUp, settleLookEngineAsk } from '../orchestrator.js';
+import { runOpsAndFollowUp, settleLookEngineAsk, type SendFollowUp } from '../orchestrator.js';
+import { createMouth } from '../../state/mouth.js';
+import { splitIntoBubbles } from '../../pipeline/bubbles.js';
 
 const unclearLane = async () => ({ text: 'UNCLEAR', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' });
 __setConsentLlmForTests(unclearLane);
@@ -508,12 +510,12 @@ test('an answer that lands after a newer ask went out never erases the newer ask
   assert.equal(m?.taskId, t2.id, 'the newer ask still stands');
 });
 
-/** A look whose engine pauses on REQ mid-run and then answers; `send` is the mouth it delivers through. */
-async function lookThatAsked(t: OpsTask, send: (chatId: string, content: string | (() => Promise<string | null>)) => Promise<'sent' | 'dropped'>): Promise<void> {
+/** A look whose engine pauses on `req` mid-run and then answers; `send` is the mouth it delivers through. */
+async function lookThatAsked(t: OpsTask, send: SendFollowUp, req: typeof REQ = REQ): Promise<void> {
   __resetOpsCoordination();
   resetEngineBackendCache({
     name: 'hermes',
-    runTask: async (_p: string, _t: OpsTask, ctx: EngineRunContext) => { ctx.onApprovalRequest?.(REQ); await flush(); return 'ANSWER: done\nFLAGS: none'; },
+    runTask: async (_p: string, _t: OpsTask, ctx: EngineRunContext) => { ctx.onApprovalRequest?.(req); await flush(); return 'ANSWER: done\nFLAGS: none'; },
     async createReminder() { return { id: 'r', title: 't', schedule: 's' }; }, async listReminders() { return []; },
     async cancelReminder() { return false; }, async remember() {}, async probe() { return { ok: true }; }, async channelSend() { return {}; },
   });
@@ -524,6 +526,19 @@ async function lookThatAsked(t: OpsTask, send: (chatId: string, content: string 
   }
   await flush();
 }
+
+test('the ask reaches the send path with the command byte for byte, through the real mouth and splitter', async () => {
+  const t = mkTask();
+  const req = { handle: { engine: 'hermes' as const, runId: 'run_verbatim' }, command: 'rm -rf *.tmp _old_ && python -c "a  =  1" -- x --- y — done. ok', description: 'clean up' };
+  const delivered: Array<{ bubbles: string[]; paced?: boolean; verbatim?: boolean }> = [];
+  const speak = createMouth({
+    sendBubbles: async (_c, bubbles, o) => { delivered.push({ bubbles, paced: o.paced, verbatim: o.verbatim }); },
+    splitIntoBubbles,
+    lastSpokenAt: () => undefined,
+  });
+  await lookThatAsked(t, speak, req);
+  assert.deepEqual(delivered[0], { bubbles: ['your hermes wants to run this before it keeps going (clean up)', req.command, 'you ok with that?'], paced: false, verbatim: true });
+});
 
 test('a look whose message never named its step clears it: the fallback voicing, or a run that threw', async () => {
   // No LLM lane in tests, so the composer fails and Fallfirm's fallback is what goes out.
