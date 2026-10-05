@@ -36,20 +36,36 @@ export const HOST_SETUP_PHRASES = [
   'permission', 'permissions', 'api key', 'token', 'password', 'credential', 'credentials',
 ] as const;
 
+/**
+ * The words that send a REQUEST or a brief to the lane (judgeSetupInAsk): a setup she left in the
+ * ask instead of splitting it out reaches the engine all the same. Only the verbs of bringing code in
+ * or configuring the engine, because a link, a password or a script is ordinary research material
+ * in a request, and even a verb only asks the lane, which tells a lookup about a setup from one.
+ */
+export const ASK_SETUP_PHRASES = [
+  'install', 'download', 'clone', 'set up', 'configure', 'pip', 'npm', 'npx', 'brew', 'curl', 'wget',
+  'sudo', 'chmod',
+] as const;
+
 const NON_WORD = /[^a-z0-9]+/g;
 const LINK = /https?:\/\/\S+/i;
 const PHRASE_TOKENS = HOST_SETUP_PHRASES.map(p => p.split(' '));
+const ASK_PHRASE_TOKENS = ASK_SETUP_PHRASES.map(p => p.split(' '));
 
-/** What made this action host setup ('link', or the phrase that matched), or undefined. PURE. */
-export function findHostSetupSignal(action: string): string | undefined {
-  if (LINK.test(action)) return 'link';
-  const tokens = action.toLowerCase().replace(NON_WORD, ' ').trim().split(' ').filter(Boolean);
-  for (const words of PHRASE_TOKENS) {
+function findPhrase(text: string, phrases: readonly string[][]): string | undefined {
+  const tokens = text.toLowerCase().replace(NON_WORD, ' ').trim().split(' ').filter(Boolean);
+  for (const words of phrases) {
     for (let at = 0; at + words.length <= tokens.length; at++) {
       if (words.every((w, i) => tokens[at + i] === w)) return words.join(' ');
     }
   }
   return undefined;
+}
+
+/** What made this action host setup ('link', or the phrase that matched), or undefined. PURE. */
+export function findHostSetupSignal(action: string): string | undefined {
+  if (LINK.test(action)) return 'link';
+  return findPhrase(action, PHRASE_TOKENS);
 }
 
 const HOST_SETUP_SYSTEM_PROMPT = [
@@ -95,6 +111,49 @@ export async function judgeHostSetup(
       message: 'host-setup classification failed; the action waits for their yes', err,
     });
     return { risky: true, trigger: 'lane_failed' };
+  }
+}
+
+const SETUP_IN_ASK_SYSTEM_PROMPT = [
+  "An AI agent with a terminal on the user's own computer has been handed the task below: what the user asked for, and the brief it works from.",
+  'Decide whether the task has the agent itself bring new code onto that computer (installing, downloading or setting up a skill, plugin, package, server or script it would keep or run), run a command there, or change its own settings or permissions.',
+  'Finding, reading or explaining something, how a thing is installed included, counts as SAFE.',
+  'Reply with exactly one word: RISKY if the task does any of the first, SAFE if it does none. When in doubt, RISKY: a wrong SAFE runs something on their machine that nobody approved.',
+].join(' ');
+
+/** How much of each text the lane reads: a brief can run long, and the setup is in its opening. */
+const ASK_SHOWN_CHARS = 4000;
+
+/**
+ * Does the request or the brief itself have the engine set something up? Read only past one of
+ * ASK_SETUP_PHRASES, so a look with none costs nothing; past one, ONE classify call decides, and a
+ * failed call is risky. English only like every lexicon here: a setup in another language that she
+ * left inside the request is the lane's only when an English verb sits beside it.
+ */
+export async function judgeSetupInAsk(
+  texts: readonly (string | undefined)[],
+  deps: { llm?: typeof callLLM } = {},
+): Promise<{ risky: boolean; trigger: 'none' | 'llm' | 'lane_failed'; signal?: string }> {
+  const parts = texts.map(t => (t ?? '').trim()).filter(Boolean);
+  const signal = parts.map(t => findPhrase(t, ASK_PHRASE_TOKENS)).find(Boolean);
+  if (!signal) return { risky: false, trigger: 'none' };
+  const llm = deps.llm ?? llmForTests ?? callLLM;
+  try {
+    const res = await llm({
+      role: 'classify',
+      system: SETUP_IN_ASK_SYSTEM_PROMPT,
+      // Model-written text, tagged as data: it is being CLASSIFIED, never followed.
+      messages: [{ role: 'user', content: wrapPrompt(parts.map((t, i) => dataTag(i === 0 ? 'request' : 'brief', t.slice(0, ASK_SHOWN_CHARS))).join('\n')) }],
+      trace: { label: 'ops:host_setup' },
+    });
+    const word = (res.text ?? '').trim().toUpperCase().replace(/[^A-Z]+/g, ' ').trim().split(' ')[0] ?? '';
+    return { risky: word !== 'SAFE', trigger: 'llm', signal };
+  } catch (err) {
+    reportError({
+      source: 'ops', category: 'classifier_failure', severity: 'warn',
+      message: 'setup-in-request classification failed; the look waits for their yes', err,
+    });
+    return { risky: true, trigger: 'lane_failed', signal };
   }
 }
 

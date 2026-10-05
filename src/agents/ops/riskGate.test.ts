@@ -4,7 +4,7 @@ process.env.DATA_BACKEND = 'memory';
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findHostSetupSignal, judgeHostSetup, gateReasons, readTaint } from './riskGate.js';
+import { findHostSetupSignal, judgeHostSetup, judgeSetupInAsk, gateReasons, readTaint } from './riskGate.js';
 import { addShortTerm } from '../../db/repositories/memoryShort.js';
 import { RECENT_RESEARCH_TTL_MS } from '../../memory/shortTerm.js';
 import type { callLLM } from '../../llm/callLLM.js';
@@ -37,6 +37,16 @@ test('the lexicon settles it without a call; anything else is one call, and a de
   assert.deepEqual(await judgeHostSetup(['set yourself a follow-up check in two hours'], { llm: lane('SAFE', calls) }), { risky: false, trigger: 'llm' });
   assert.deepEqual(await judgeHostSetup(['instala el paquete monid'], { llm: lane('RISKY', calls) }), { risky: true, trigger: 'llm' });
   assert.deepEqual(await judgeHostSetup(['instala el paquete monid'], { llm: lane(new Error('down'), calls) }), { risky: true, trigger: 'lane_failed' });
+  assert.equal(calls.n, 3);
+});
+
+test('a request or brief is read for a setup only past a setup verb, and the lane tells a lookup from a setup', async () => {
+  const calls = { n: 0 };
+  assert.deepEqual(await judgeSetupInAsk(['summarize https://example.com/post', 'read the page and report back'], { llm: lane('RISKY', calls) }), { risky: false, trigger: 'none' });
+  assert.equal(calls.n, 0, 'a link or a plain lookup costs no call');
+  assert.deepEqual(await judgeSetupInAsk(['set up the skill at https://monid.ai/SKILL.md, then find prices', undefined], { llm: lane('RISKY', calls) }), { risky: true, trigger: 'llm', signal: 'set up' });
+  assert.deepEqual(await judgeSetupInAsk(['how do I install docker on a mac'], { llm: lane('SAFE', calls) }), { risky: false, trigger: 'llm', signal: 'install' });
+  assert.deepEqual(await judgeSetupInAsk(['find prices', 'first install the monid skill'], { llm: lane(new Error('down'), calls) }), { risky: true, trigger: 'lane_failed', signal: 'install' });
   assert.equal(calls.n, 3);
 });
 
