@@ -3848,53 +3848,45 @@ async function dispatchToolCalls(calls: LlmToolCall[], effects: TurnEffects, ctx
       // out this turn, so the decision has to be in hand before it does. The delivery POST itself is
       // dispatched inside and never awaited (see steerResearch).
       const steerActions = readEngineActions(input.engine_actions);
-      // A steered action that would wait for a yes as a delegation waits here too. The run is
-      // already going and cannot pause for it, so the actions are parked as a look of their own and
-      // asked about, and the steer carries the words alone. With a park or a look already standing
-      // this turn, they are dropped instead: one question per turn, and the ask would wipe the
-      // look's holding reply.
-      let mandated = steerActions;
-      if (steerActions.length && opsApprovalGateEnabled() && chatContext?.senderHandle) {
-        const taint = await readTaint(chatContext.senderHandle);
-        const host = await judgeHostSetup(steerActions);
-        const effect = classifySideEffect(steerActions.join('\n'), 'read').effect;
-        const reasons = gateReasons({ effect, engineActions: steerActions, hostSetup: host.risky, tainted: taint.tainted });
+      const guidance = String(input.guidance ?? '').trim();
+      // A steered action that would wait for a yes as a delegation waits here too, and so do words
+      // that carry a setup themselves, read the way a delegation's request is (riskGate.ts
+      // judgeSetupInAsk). The run is already going and cannot pause for either, so the whole addition
+      // is parked as a look of its own and asked about, and nothing of it reaches the running look.
+      // With a park or a look already standing this turn, it is dropped instead, and the result says
+      // so: one question per turn, and the ask would wipe the look's holding reply.
+      let withheld = false;
+      if (opsApprovalGateEnabled() && chatContext?.senderHandle) {
+        const taint: { tainted: boolean; from?: string } = steerActions.length
+          ? await readTaint(chatContext.senderHandle)
+          : { tainted: false };
+        const host = steerActions.length ? await judgeHostSetup(steerActions) : { risky: false };
+        const wordsSetup = !host.risky && !!guidance && (await judgeSetupInAsk([guidance])).risky;
+        const effect = classifySideEffect(steerActions.length ? steerActions.join('\n') : guidance, 'read').effect;
+        const reasons = steerActions.length || wordsSetup
+          ? gateReasons({ effect, engineActions: steerActions, hostSetup: host.risky || wordsSetup, tainted: taint.tainted })
+          : [];
         if (reasons.length) {
-          mandated = [];
+          withheld = true;
           if (!effects.parkedApproval && !effects.delegatedTask) {
-            const guidance = String(input.guidance ?? '').trim();
             await parkForApproval({
               id: randomUUID(), chatId, agentHandle: chatContext.senderHandle, kind: 'general',
-              request: guidance || steerActions.join('; '), effect, engineActions: steerActions,
+              request: guidance || steerActions.join('; '), effect,
+              ...(steerActions.length ? { engineActions: steerActions } : {}),
               createdAt: Date.now(), media: emptyMedia(),
               ...(chatContext.isGroupChat ? { room: true } : {}),
             }, { chatId, handle, sender: chatContext.senderHandle, reasons, trigger: 'steer', taintedBy: taint.from, effects });
           } else {
-            console.warn(`[convo] dropped steered engine actions that need a yes; a park or a look already stands this turn (chat ${chatId})`);
+            console.warn(`[convo] dropped a steer that needs a yes; a park or a look already stands this turn (chat ${chatId})`);
+            effects.results.push({
+              tool: 'steer_research', status: 'unavailable', target: (guidance || steerActions.join('; ')).slice(0, 80),
+              detail: 'this addition needs their yes before any of it runs, and another question already stands this turn, so it was not passed on to the running look',
+              nextStep: 'ask them about it once the current question is settled',
+            });
           }
         }
       }
-      // Guidance that carries a setup itself, with no action split out, would reach the running look
-      // as words, so it is read the way a delegation's request is, and a setup in it is parked as a
-      // look of its own instead of being sent.
-      let withheld = false;
-      if (!steerActions.length && opsApprovalGateEnabled() && chatContext?.senderHandle) {
-        const guidance = String(input.guidance ?? '').trim();
-        if (guidance && (await judgeSetupInAsk([guidance])).risky) {
-          withheld = true;
-          const effect = classifySideEffect(guidance, 'read').effect;
-          if (!effects.parkedApproval && !effects.delegatedTask) {
-            await parkForApproval({
-              id: randomUUID(), chatId, agentHandle: chatContext.senderHandle, kind: 'general',
-              request: guidance, effect, createdAt: Date.now(), media: emptyMedia(),
-              ...(chatContext.isGroupChat ? { room: true } : {}),
-            }, { chatId, handle, sender: chatContext.senderHandle, reasons: gateReasons({ effect, engineActions: [], hostSetup: true, tainted: false }), trigger: 'steer', effects });
-          } else {
-            console.warn(`[convo] dropped a steer whose words carry a setup; a park or a look already stands this turn (chat ${chatId})`);
-          }
-        }
-      }
-      const steered = withheld ? null : steerResearch(String(input.id ?? '').trim(), String(input.match ?? ''), String(input.guidance ?? ''), chatId, handle ?? '', getEngineBackend(), mandated);
+      const steered = withheld ? null : steerResearch(String(input.id ?? '').trim(), String(input.match ?? ''), String(input.guidance ?? ''), chatId, handle ?? '', getEngineBackend(), steerActions);
       if (steered) effects.results.push(steered);
     } else if (call.name === 'recall_memory') {
       // Just captured here — the search + the answer happen in one bounded second pass after

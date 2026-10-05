@@ -202,6 +202,7 @@ test('a steered install never rides the running look: it parks as a look of its 
   assert.equal(parked.length, 1, 'the setup waits for their yes');
   assert.deepEqual((parked[0].meta.task as Record<string, unknown>).engineActions, [MONID]);
   assert.deepEqual(getOpsEngineActions(a.chatId, 'run-1'), [], 'nothing was mandated on the running look');
+  assert.deepEqual(takePendingSteers(a.chatId, 'run-1'), [], 'and its words never reached it either');
   assert.match(out.text ?? '', /monid\.ai\/SKILL\.md/);
 });
 
