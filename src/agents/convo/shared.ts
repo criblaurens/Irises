@@ -64,7 +64,7 @@ import { steerWithRetry } from '../ops/steer.js';
 import { etaStatus, estimateOpsEta } from '../etaEstimate.js';
 import { turnNeedsReach } from './reachClassify.js';
 import {
-  salvageHoldingText, salvageHold, refusedCapabilities,
+  salvageHoldingText, salvageHold, holdBeat, refusedCapabilities,
   holdsTheAnswer, heldMemoryBrief, heldMemoryCount, routingGateHitReceipt,
   routingGateMemoryAwareEnabled, type RoutingGateDecision,
 } from '../routingGate.js';
@@ -4985,12 +4985,13 @@ export async function processConvoResult(args: {
     if (note) effects.delegatedTask.threadNote = note;
     // And it joins her recent beats (state/holdingBeats.ts), which the next handoff's prompt and floor
     // steer off. Only the holding part, and only on a turn whose reply IS a holding line: a parked
-    // turn's reply is the question, never a beat. Only its LAST bubble, too: a holding part of more
-    // than one bubble opens on a nod to what they said and ends on the beat, and the nod is no beat
-    // to steer off. Fire and forget: a lost write costs one beat of variety, and the reply must not
-    // wait on it.
+    // turn's reply is the question, never a beat. Only its beat, too (routingGate.ts holdBeat): a
+    // holding part of more than one bubble can carry a nod to what they said before the beat and an
+    // answer to their other text after it, and neither is a beat to steer off. A hold with no bubble
+    // that reads as a beat records its last one. Fire and forget: a lost write costs one beat of
+    // variety, and the reply must not wait on it.
     if (!effects.parkedApproval) {
-      const beat = holdingRecord.split(/\n---\n/).map(b => b.trim()).filter(Boolean).at(-1);
+      const beat = holdBeat(holdingRecord) ?? holdingRecord.split(/\n---\n/).map(b => b.trim()).filter(Boolean).at(-1);
       if (beat) void recordHoldingBeat(chatId, beat).catch(() => {});
     }
   }

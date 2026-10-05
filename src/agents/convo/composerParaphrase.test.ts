@@ -252,6 +252,9 @@ test('burst + delegate: her beat and her answer to their other text both ship, a
   assert.equal(out.text, '[[re:1]]on the commit thing, lemme check\n---\n[[re:2]]and who, the ppl reachin out to work with u');
   assert.equal(out.delegatedTask!.lookRe, 1, 'the late answer threads to the text the look came from');
   assert.equal(out.delegatedTask!.holdingText, 'on the commit thing, lemme check\n---\nand who, the ppl reachin out to work with u');
+  // Her recent beat is the beat, not the answer to their other text that follows it.
+  for (let i = 0; i < 5 && !(await recentHoldingBeats(a.chatId)).length; i++) await new Promise(r => setTimeout(r, 5));
+  assert.deepEqual(await recentHoldingBeats(a.chatId), ['on the commit thing, lemme check']);
 });
 
 test('one text, two asks: her answer to the other ask ships ahead of the leaving line', async () => {

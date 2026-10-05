@@ -163,6 +163,13 @@ export function salvageHold(legacyText: string | null, ground?: string): Salvage
   return lookRe === undefined ? null : { text: kept.join('\n---\n'), lookRe };
 }
 
+/** The beat of a kept hold, without its routing tag: its first bubble that holds the line. A whole
+ *  hold can carry a reaction before the beat and an answer to their other text after it, so the beat
+ *  is neither its first bubble nor its last. Undefined when no bubble reads as a beat. */
+export function holdBeat(legacyText: string): string | undefined {
+  return legacyText.split(/\n---\n/).map(b => parseReplyTag(b.trim()).text.trim()).find(t => t && isBeat(t));
+}
+
 // ── False-capability-refusal screen ─────────────────────────────────────────────────────────────
 // The other half of the same live failure the gate above catches. `needsGrounding` reads the USER's
 // message; these two read the MODEL's DRAFT. A weak Convo model, handed a request it could have

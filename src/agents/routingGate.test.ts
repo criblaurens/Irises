@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  needsGrounding, salvageHoldingText, salvageHold, refusalLike, refusedCapabilities,
+  needsGrounding, salvageHoldingText, salvageHold, holdBeat, refusalLike, refusedCapabilities,
   holdsTheAnswer, heldMemoryBrief, routingGateHitReceipt,
   routingGateMemoryAwareEnabled, HELD_MEMORY_KINDS, OPS_HELD_MEMORY_CHARS, OPS_HELD_LINE_CHARS,
   OPS_HELD_BLOCK_CHARS,
@@ -452,4 +452,11 @@ test('whole hold: the shared screen stops the walk, and no beat keeps nothing', 
   assert.equal(salvageHold('bali trip huh'), null);
   assert.equal(salvageHold(null), null);
   assert.equal(salvageHold(''), null);
+});
+
+test("holdBeat: the hold's beat, wherever it sits, without its tag", () => {
+  assert.equal(holdBeat('on the commit thing, lemme check\n---\nand who, the ppl reachin out to work with u'), 'on the commit thing, lemme check');
+  assert.equal(holdBeat("you're welcome!\n---\npulling comps on 55 Birch now"), 'pulling comps on 55 Birch now');
+  assert.equal(holdBeat('[[re:2]]lemme check'), 'lemme check');
+  assert.equal(holdBeat('bali trip huh'), undefined);
 });
