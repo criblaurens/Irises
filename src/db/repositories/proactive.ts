@@ -143,6 +143,20 @@ export async function markFailed(id: string): Promise<void> {
   settle(id, 'failed');
 }
 
+/** A send the mouth deliberately dropped (staleness, or an empty voicing). Final like a delivery,
+ *  so it is never retried, but flagged: nobody saw it, so it must never count as a text they ignored
+ *  (memory/proactiveBackoff.ts). */
+export async function markDropped(id: string): Promise<void> {
+  try {
+    stmt(
+      `UPDATE proactive_deliveries SET status = 'delivered', delivered_at = ?, meta_json = json_set(meta_json, '$.dropped', 1) WHERE id = ?`
+    ).run(Date.now(), id);
+  } catch (error) {
+    logDbError('markDropped', error);
+    settle(id, 'delivered');
+  }
+}
+
 /**
  * Pending rows whose moment has come, oldest first: a deferred row at its deliver_after, or an
  * immediate row left pending past the stuck grace (a crash mid-send). Reads degrade to [].
@@ -184,19 +198,52 @@ export async function listRecentReminders(chatId: string, sinceMs: number, limit
   }
 }
 
-/** Hard-delete SETTLED rows past `maxAgeMs` (reminders past `reminderMaxAgeMs`), called by the daily
- *  retention sweep. Pending rows are never swept — a deferral or a crash-recovery row must survive
- *  until it is delivered. */
+/** The kinds SHE starts on her own. Only these count toward the back-off and only these are held by
+ *  it; everything the user set up (reminder, email, memo) and the one-off notes (update,
+ *  introduction) are always delivered and never counted. */
+export const BACKOFF_KINDS: readonly string[] = ['callback', 'musing', 'checkin'];
+
+/**
+ * Her own texts that have gone unanswered: delivered, not dropped, back-off kinds, newer than
+ * `sinceMs` (default: their latest message in this chat, 0 when they never wrote). Oldest first.
+ * Reads degrade to [] — a failed read lets her text as before rather than silencing her.
+ */
+export async function unansweredProactiveKinds(chatId: string, sinceMs?: number): Promise<string[]> {
+  try {
+    const since = sinceMs ?? ((stmt(
+      `SELECT COALESCE(MAX(created_at), 0) AS at FROM messages WHERE chat_id = ? AND role = 'user'`
+    ).get(chatId) as { at: number } | undefined)?.at ?? 0);
+    const rows = stmt(
+      `SELECT kind FROM proactive_deliveries
+       WHERE chat_id = ? AND status = 'delivered' AND delivered_at > ?
+         AND kind IN (${BACKOFF_KINDS.map(() => '?').join(',')})
+         AND COALESCE(json_extract(meta_json, '$.dropped'), 0) = 0
+       ORDER BY delivered_at ASC`
+    ).all(chatId, since, ...BACKOFF_KINDS) as unknown as { kind: string }[];
+    return rows.map(r => r.kind);
+  } catch (error) {
+    logDbError('unansweredProactiveKinds', error);
+    return [];
+  }
+}
+
+/** Hard-delete SETTLED rows past `maxAgeMs`, called by the daily retention sweep. Reminders AND the
+ *  back-off kinds live for `reminderMaxAgeMs`: a reminder is voiced against its previous runs, and a
+ *  3-text unanswered stack can span two weekly pings plus a musing, which the 7-day window would
+ *  erase before it ever reached 3. Pending rows are never swept — a deferral or a crash-recovery row
+ *  must survive until it is delivered. */
 export async function sweepOldProactive(
   maxAgeMs: number = PROACTIVE_MAX_AGE_MS,
   reminderMaxAgeMs: number = PROACTIVE_REMINDER_MAX_AGE_MS,
 ): Promise<number> {
   try {
     const now = Date.now();
+    const longKinds = ['reminder', ...BACKOFF_KINDS];
+    const marks = longKinds.map(() => '?').join(',');
     const res = stmt(
       `DELETE FROM proactive_deliveries WHERE status IN ('delivered','failed')
-         AND ((kind = 'reminder' AND created_at <= ?) OR (kind != 'reminder' AND created_at <= ?))`
-    ).run(now - reminderMaxAgeMs, now - maxAgeMs);
+         AND ((kind IN (${marks}) AND created_at <= ?) OR (kind NOT IN (${marks}) AND created_at <= ?))`
+    ).run(...longKinds, now - reminderMaxAgeMs, ...longKinds, now - maxAgeMs);
     return Number(res.changes);
   } catch (error) {
     logDbError('sweepOldProactive', error);
