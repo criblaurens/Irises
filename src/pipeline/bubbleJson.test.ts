@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseBubblesJson, bubblesToLegacyText, normalizeLlmText, parseReply, parseMmReply, buildEnvelopeSchema,
-  BUBBLE_ENVELOPE_SCHEMA, MM_ENVELOPE_SCHEMA, MAX_BUBBLES, BUBBLE_HARD_CAP, BUBBLE_LAW_MAX,
+  BUBBLE_ENVELOPE_SCHEMA, FOLLOW_UP_ENVELOPE_SCHEMA, MM_ENVELOPE_SCHEMA, MAX_BUBBLES, BUBBLE_HARD_CAP, BUBBLE_LAW_MAX,
   buildBubbleReport, noteBubbleReport, lastBubbleReport,
 } from './bubbleJson.js';
 import { splitIntoBubbles, splitIntoBubblesWithSplits, MAX_BUBBLE_WORDS, BUBBLE_WORD_TARGET_LO, BUBBLE_WORD_TARGET_HI } from './bubbles.js';
@@ -613,4 +613,12 @@ test('a tool-call item that spills the flat args after `args` keeps the tool nam
 test('a run of marks typed after the closing quote is moved back inside the bubble', () => {
   const r = parseReply('{"confidence_level":85,"tool_calls":null,"bubbles":[{"text":"ohhh no. WAIT"},{"text":"u better not say it\'s u"...","re":null}],"status":null}');
   assert.equal(r.legacyText, 'ohhh no. WAIT\n---\nu better not say it\'s u...');
+});
+
+test('the follow-up envelope adds one required flag after the bubbles, and the parse reads it strictly', () => {
+  assert.deepEqual(FOLLOW_UP_ENVELOPE_SCHEMA.required, ['confidence_level', 'bubbles', 'offered_follow_up', 'status']);
+  assert.deepEqual(Object.keys(FOLLOW_UP_ENVELOPE_SCHEMA.properties as object), ['confidence_level', 'bubbles', 'offered_follow_up', 'status']);
+  assert.equal(parseReply('{"bubbles":[{"text":"want it held?"}],"offered_follow_up":true}').offeredFollowUp, true);
+  assert.equal(parseReply('{"bubbles":[{"text":"ok"}],"offered_follow_up":"true"}').offeredFollowUp, undefined);
+  assert.equal(parseReply('{"bubbles":[{"text":"ok"}]}').offeredFollowUp, undefined);
 });

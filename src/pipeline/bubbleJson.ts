@@ -50,6 +50,9 @@ export interface ParsedReply {
    *  can never colour another reply's. The send boundary reports the flag of the parse that produced
    *  the reply it ships (index.ts → buildBubbleReport). */
   hardCapped: boolean;
+  /** The composer's `offered_follow_up` (FOLLOW_UP_ENVELOPE_SCHEMA), present only when it is the
+   *  literal `true`. Absent on every other envelope. */
+  offeredFollowUp?: true;
 }
 
 /** MM's parsed reply: bridged bubbles plus the two MM-only channels. Unlike ParsedReply there is
@@ -120,6 +123,22 @@ export const BUBBLE_ENVELOPE_SCHEMA: Record<string, unknown> = {
         },
       },
     },
+    status: STATUS_SCHEMA_PROP,
+  },
+};
+
+/** The composer's envelope when a next step is on the table (agents/composerCore.ts `followUp`): the
+ *  shared envelope plus one required boolean, whether her last item offers that step. Written AFTER
+ *  the bubbles, so it reports what she did rather than deciding it, and before the hidden `status`,
+ *  which stays last for the truncation reason above. A reply that never says (a lane that dropped the
+ *  schema, a cut-off) reads as no offer. */
+export const FOLLOW_UP_ENVELOPE_SCHEMA: Record<string, unknown> = {
+  ...BUBBLE_ENVELOPE_SCHEMA,
+  required: ['confidence_level', 'bubbles', 'offered_follow_up', 'status'],
+  properties: {
+    confidence_level: (BUBBLE_ENVELOPE_SCHEMA.properties as Record<string, unknown>).confidence_level,
+    bubbles: (BUBBLE_ENVELOPE_SCHEMA.properties as Record<string, unknown>).bubbles,
+    offered_follow_up: { type: 'boolean', description: 'true only when your last item offers to also take the next step your brief names, as one yes/no question; false otherwise' },
     status: STATUS_SCHEMA_PROP,
   },
 };
@@ -686,5 +705,6 @@ export function parseReply(raw: string | null | undefined): ParsedReply {
     wasEnvelope: true,
     statusRaw: rawStatus && typeof rawStatus === 'object' ? rawStatus as Record<string, unknown> : undefined,
     hardCapped: env.hardCapped,
+    ...(env.source?.offered_follow_up === true ? { offeredFollowUp: true as const } : {}),
   };
 }

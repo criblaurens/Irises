@@ -27,7 +27,7 @@ import { renderSelfSection } from '../memory/selfHarvest.js';
 import { familiarityBandFor, type FamiliarityBand } from '../persona/familiarity.js';
 import { getConversation, type StoredMessage } from '../state/conversation.js';
 import { stripEchoedHolding } from './guardrails.js';
-import { parseReply } from '../pipeline/bubbleJson.js';
+import { parseReply, FOLLOW_UP_ENVELOPE_SCHEMA } from '../pipeline/bubbleJson.js';
 import { stripReplyTag } from '../state/replyThreading.js';
 import { timestampLabel } from '../pipeline/chatTime.js';
 import { wrapPrompt } from '../llm/promptTag.js';
@@ -87,6 +87,10 @@ export interface ComposerCoreArgs {
   /** One line stated after `</prompt>` and before FORMAT_ANCHOR: the moment's own move at the
    *  recency edge. FORMAT_ANCHOR stays the last tokens. */
   edge?: string;
+  /** A next step is on the table for this answer (agents/ops/followUp.ts): the envelope carries
+   *  `offered_follow_up`, read back by composeWithComposerDetailed. Absent, the call is byte-identical
+   *  to before it existed. */
+  followUp?: true;
   /** Test seam (repo convention: DI, no module mocks). */
   llm?: typeof callLLM;
 }
@@ -97,6 +101,12 @@ export interface ComposerCoreArgs {
  * text (`\n---\n`) ready for the send path. THROWS once the two-attempt ladder is spent.
  */
 export async function composeWithComposer(args: ComposerCoreArgs): Promise<string> {
+  return (await composeWithComposerDetailed(args)).text;
+}
+
+/** composeWithComposer, plus whether her last item offers the next step she was handed (`followUp`;
+ *  always false without it). */
+export async function composeWithComposerDetailed(args: ComposerCoreArgs): Promise<{ text: string; offeredFollowUp: boolean }> {
   const { chatId, handle, buildInstruction, holdingText, trace } = args;
   const llm = args.llm ?? callLLM;
 
@@ -193,6 +203,7 @@ export async function composeWithComposer(args: ComposerCoreArgs): Promise<strin
         // old 512) starved the budget on reasoning alone (finish_reason=length, content=null) and
         // every reply degraded to Fallfirm. The role ceiling in MAX_TOKENS budgets both.
         jsonBubbles: true, // composer is tool-less; structured outputs guarantee the envelope
+        ...(args.followUp ? { envelopeSchema: FOLLOW_UP_ENVELOPE_SCHEMA } : {}),
         messages,
         trace,
       });
@@ -208,7 +219,12 @@ export async function composeWithComposer(args: ComposerCoreArgs): Promise<strin
       const composed = reply.legacyText ? stripReplyTag(reply.legacyText) : reply.legacyText;
       // Tripwire for the fused-bubble failure: if the model retyped the holding line at the head
       // of its reply (glued to the answer), cut the echo — that line is already on their screen.
-      if (composed) return holdingText ? stripEchoedHolding(composed, holdingText) : composed;
+      if (composed) {
+        return {
+          text: holdingText ? stripEchoedHolding(composed, holdingText) : composed,
+          offeredFollowUp: args.followUp === true && reply.offeredFollowUp === true,
+        };
+      }
       lastErr = new Error('composer returned no text');
     } catch (err) {
       lastErr = err;

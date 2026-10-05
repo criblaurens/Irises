@@ -8,7 +8,8 @@ process.env.TZ = 'UTC';
 
 import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { composeWithComposer, buildComposerDynamic, FORMAT_ANCHOR } from './composerCore.js';
+import { composeWithComposer, composeWithComposerDetailed, buildComposerDynamic, FORMAT_ANCHOR } from './composerCore.js';
+import { FOLLOW_UP_ENVELOPE_SCHEMA } from '../pipeline/bubbleJson.js';
 import { renderPersonaBlock } from '../persona/policy.js';
 import { addMessage } from '../db/repositories/conversations.js';
 import { saveAffectState } from '../db/repositories/affectState.js';
@@ -414,4 +415,17 @@ test('the composer prose carries the view section and none of the relay-only lin
   for (const pinned of ['(just making sure)', "(couldn't get that one)"]) {
     assert.ok(md.includes(pinned), `byte-pinned beat note missing: ${pinned}`);
   }
+});
+
+test('a follow-up compose asks for the offer flag and reads it back; without one the call is unchanged', async () => {
+  const captured: LlmRequest[] = [];
+  const offered = await composeWithComposerDetailed({
+    ...base, followUp: true, buildInstruction: () => 'x',
+    llm: fakeLlm('{"confidence_level":90,"bubbles":[{"text":"the 9am is $412"},{"text":"want me to hold it?"}],"offered_follow_up":true}', captured),
+  });
+  assert.deepEqual(offered, { text: 'the 9am is $412\n---\nwant me to hold it?', offeredFollowUp: true });
+  assert.equal(captured[0].envelopeSchema, FOLLOW_UP_ENVELOPE_SCHEMA);
+  const plain = await composeWithComposerDetailed({ ...base, buildInstruction: () => 'x', llm: fakeLlm('{"bubbles":[{"text":"ok"}],"offered_follow_up":true}', captured) });
+  assert.deepEqual(plain, { text: 'ok', offeredFollowUp: false });
+  assert.equal('envelopeSchema' in captured[1], false, 'no schema key at all on a plain compose');
 });
