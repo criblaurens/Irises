@@ -16,7 +16,9 @@ import {
   isDuplicateDelegation,
   setOpsTaskSink,
   opsStaleMs,
+  extendOpsLeg,
 } from './opsCoordination.js';
+import { ENGINE_APPROVAL_WAIT_MS } from '../agents/ops/engineBackend.js';
 import { createOpsTaskRecovery, opsDurableTasksEnabled, opsLostText } from './opsTaskDurability.js';
 import { getOpsTask, insertRunning, settleOpsTask } from '../db/repositories/opsTasks.js';
 import { closeDb, resetStorageForTests, stmt } from '../db/sqlite.js';
@@ -199,6 +201,28 @@ test('the sweep leaves a settled row and a still-running one alone', async () =>
   assert.equal(fake.calls.length, 0);
   assert.equal(getOpsTask('t-done')?.status, 'delivered');
   assert.equal(getOpsTask('t-live')?.status, 'running');
+});
+
+test('the sweep leaves alone a leg still waiting on their answer to an engine ask', async () => {
+  const fake = fakeDeliver();
+  const recovery = createOpsTaskRecovery({ deliver: fake.deliver });
+  setOpsTaskSink(recovery.sink);
+  // Both legs started past the horizon, in memory and in the row alike.
+  const realNow = Date.now;
+  const then = realNow() - opsStaleMs() - 60_000;
+  Date.now = () => then;
+  try {
+    markOpsStart('chat-a', 't-asking', { kind: 'general', request: 'clear the scratch folder' });
+    markOpsStart('chat-a', 't-stuck', { kind: 'research', request: 'when is the tax deadline' });
+  } finally {
+    Date.now = realNow;
+  }
+  extendOpsLeg('chat-a', 't-asking', ENGINE_APPROVAL_WAIT_MS);
+
+  await recovery.sweepStranded();
+  assert.equal(getOpsTask('t-asking')?.status, 'running');
+  assert.equal(getOpsTask('t-stuck')?.status, 'lost', 'a stuck live leg with no wait on it is still owned up to');
+  assert.deepEqual(fake.calls.map(c => c.dedupeKey), ['ops-lost:t-stuck']);
 });
 
 test('one bad row does not end the sweep', async () => {
