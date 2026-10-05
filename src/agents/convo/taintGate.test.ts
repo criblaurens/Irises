@@ -20,7 +20,7 @@ import { __setConsentLlmForTests } from '../ops/consent.js';
 import { __setHostSetupLlmForTests } from '../ops/riskGate.js';
 import { approvalAskFallback, reconfirmAskFallback } from '../ops/sideEffects.js';
 import { buildTaskPrompt } from '../ops/client.js';
-import { armEngineApproval, markEngineApprovalTimedOut, __setEngineApprovalBackendForTests } from '../ops/engineApproval.js';
+import { armEngineApproval, markEngineApprovalTimedOut, __setEngineApprovalBackendForTests, __setEngineWaitingOnForTests } from '../ops/engineApproval.js';
 import type { EngineBackend, EngineRunHandle } from '../ops/engineBackend.js';
 import type { OpsTask } from '../types.js';
 import type { LlmResult, LlmToolCall, LlmRequest } from '../../llm/types.js';
@@ -231,12 +231,14 @@ test('her line that the step is cleared stands on the engine answer: no correcti
   try {
     const a = args('go');
     await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');
+    __setEngineWaitingOnForTests(ENGINE_REQ.handle.runId, ENGINE_REQ.command);
     const { turn, seen } = reasker(['you said nothing changed']);
     await processConvoResult({ ...a, res: makeResult(['all set']), turn });
     assert.deepEqual(calls, [[ENGINE_REQ.handle, 'once']], 'the engine got the go-ahead');
     assert.equal(seen.length, 0, 'the claim is backed by what this turn did');
   } finally {
     __setEngineApprovalBackendForTests(undefined);
+    __setEngineWaitingOnForTests(ENGINE_REQ.handle.runId, undefined);
   }
 });
 

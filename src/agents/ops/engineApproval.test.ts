@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   armEngineApproval, resolveEngineApproval, markEngineApprovalTimedOut, clearEngineApproval,
   engineApprovalWaiting, renderEngineApprovalAsk, __setEngineApprovalBackendForTests, ENGINE_ASK_MAX_COMMAND_CHARS,
-  createEngineApprovalRelay, ENGINE_APPROVAL_PREF, skippedEngineStep,
+  createEngineApprovalRelay, ENGINE_APPROVAL_PREF, skippedEngineStep, __setEngineWaitingOnForTests,
 } from './engineApproval.js';
 import { ENGINE_APPROVAL_WAIT_MS, resetEngineBackendCache, type EngineBackend, type EngineRunHandle, type EngineRunContext } from './engineBackend.js';
 import { __setConsentLlmForTests } from './consent.js';
@@ -35,6 +35,11 @@ const reply = (t: OpsTask, text: string, extra: { receivedAt?: number; competing
 /** The receipts this module wrote for one task, in order. */
 const decisions = (taskId: string) => getTraces().filter(e => e.label === 'ops:engine_approval' && e.taskId === taskId).map(e => (e.detail as { decision?: string } | undefined)?.decision);
 type Calls = Array<[EngineRunHandle, string]>;
+/** The engine is blocked on exactly this command now, as its relay heard it: the one state a yes posts 'once' in. */
+async function waitingOn<T>(req: { handle: EngineRunHandle; command: string }, fn: () => Promise<T>): Promise<T> {
+  __setEngineWaitingOnForTests(req.handle.runId, req.command);
+  try { return await fn(); } finally { __setEngineWaitingOnForTests(req.handle.runId, undefined); }
+}
 async function withEngine<T>(outcome: 'resolved' | 'not_pending' | 'failed', calls: Calls, fn: () => Promise<T>): Promise<T> {
   __setEngineApprovalBackendForTests({ resolveRunApproval: async (h: EngineRunHandle, c: 'once' | 'deny') => { calls.push([h, c]); return outcome; } } as unknown as EngineBackend);
   try { return await fn(); } finally { __setEngineApprovalBackendForTests(undefined); }
@@ -83,7 +88,7 @@ test('a yes lets that one command run once, and the ask is gone', async () => {
   const t = mkTask();
   const calls: Calls = [];
   await armEngineApproval(t, REQ, quiet, 'hermes');
-  const out = await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'go')));
+  const out = await withEngine('resolved', calls, () => waitingOn(REQ, () => resolveEngineApproval(reply(t, 'go'))));
   assert.deepEqual(calls, [[REQ.handle, 'once']]);
   assert.equal(out.result?.status, 'done');
   assert.equal(out.rerun, null);
@@ -115,7 +120,7 @@ test('an unclear reply answers nothing and the ask keeps standing', async () => 
 test('a yes that cannot reach the engine keeps the ask and says the go-ahead did not land', async () => {
   const t = mkTask();
   await armEngineApproval(t, REQ, quiet, 'hermes');
-  const out = await withEngine('failed', [], () => resolveEngineApproval(reply(t, 'yes')));
+  const out = await withEngine('failed', [], () => waitingOn(REQ, () => resolveEngineApproval(reply(t, 'yes'))));
   assert.equal(out.result?.status, 'unavailable', 'never an outcome-pass status: there is nothing a second draft could fix');
   assert.match(out.result!.detail, /did not reach the engine/);
   assert.equal(await engineApprovalWaiting(t.agentHandle), true, 'their next yes can try again');
@@ -127,7 +132,7 @@ test('a yes after the engine stopped waiting comes back as a fresh run of exactl
   const askedAt = Date.now() - 60_000;
   await armEngineApproval(t, REQ, quiet, 'hermes', askedAt);
   const now = Date.now();
-  const out = await withEngine('not_pending', calls, () => resolveEngineApproval(reply(t, 'yes'), now));
+  const out = await withEngine('not_pending', calls, () => waitingOn(REQ, () => resolveEngineApproval(reply(t, 'yes'), now)));
   const r = out.rerun!;
   assert.ok(r, 'a re-run was built');
   assert.notEqual(r.id, t.id);
@@ -206,7 +211,7 @@ test('only the run that stopped waiting has its ask marked skipped', async () =>
   const calls: Calls = [];
   await armEngineApproval(t, REQ, quiet, 'hermes');
   await markEngineApprovalTimedOut(t.agentHandle, 'some_other_run');
-  await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'yes')));
+  await withEngine('resolved', calls, () => waitingOn(REQ, () => resolveEngineApproval(reply(t, 'yes'))));
   assert.deepEqual(calls, [[REQ.handle, 'once']], 'still live: the yes went to the engine');
 });
 
@@ -312,7 +317,7 @@ test('the consent reader is shown a code-written action, never the engine\'s raw
   try {
     await armEngineApproval(t, REQ, quiet, 'hermes');
     const calls: Calls = [];
-    await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'sure thing, go ahead with it')));
+    await withEngine('resolved', calls, () => waitingOn(REQ, () => resolveEngineApproval(reply(t, 'sure thing, go ahead with it'))));
     assert.equal(seen.length, 1, 'the lane read it');
     assert.ok(!seen[0].includes('rm -rf'), 'no engine command in the classify prompt');
     assert.ok(seen[0].includes('let their hermes run the one step it paused on (recursive delete)'));
@@ -491,7 +496,7 @@ test('an answer that lands after a newer ask went out never erases the newer ask
   const post = held();
   __setEngineApprovalBackendForTests({ resolveRunApproval: async () => { await post.until; return 'resolved'; } } as unknown as EngineBackend);
   try {
-    const answering = resolveEngineApproval(reply(t1, 'yes'));
+    const answering = waitingOn(REQ, () => resolveEngineApproval(reply(t1, 'yes')));
     await flush();
     await armEngineApproval(t2, runB, quiet, 'hermes');
     post.release();
@@ -566,4 +571,16 @@ test('a queued ask its run has moved past sends nothing: the run now waits on an
   first.hooks.onApprovalSettled(runB.handle, 'answered');
   await flush();
   assert.ok(!sent.includes(renderEngineApprovalAsk(REQ, 'hermes')), 'the first command is never asked: a yes to it would clear the second');
+});
+
+test('a yes to a command its run has moved past posts nothing, and re-runs exactly the command they saw', async () => {
+  const t = mkTask();
+  const calls: Calls = [];
+  await armEngineApproval(t, REQ, quiet, 'hermes');
+  const cmd2 = { ...REQ, command: 'rm -rf ~/elsewhere' };
+  const out = await withEngine('resolved', calls, () => waitingOn(cmd2, () => resolveEngineApproval(reply(t, 'yes'))));
+  assert.deepEqual(calls, [], 'no once: the engine would apply it to the command they never saw');
+  assert.deepEqual(out.rerun?.preApproved, [REQ.command]);
+  assert.ok(out.rerun?.engineActions?.[0].endsWith(JSON.stringify(REQ.command)));
+  assert.equal(await engineApprovalWaiting(t.agentHandle), false);
 });

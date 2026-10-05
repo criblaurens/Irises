@@ -56,6 +56,17 @@ export interface EngineApprovalMarker {
   timedOut?: true;
 }
 
+/** The command each run's engine waits on right now, as its relay heard it (createEngineApprovalRelay
+ *  sets it on the ask, drops it when the wait ends). A yes posts 'once' only while the run still waits
+ *  on the very command they were shown. In memory: after a restart it is empty, and a live ask from
+ *  before it is read as a late yes (a fresh run of the command they saw), never a 'once' posted blind. */
+const engineWaitingOn = new Map<string, string>();
+/** Test seam: the command one run's engine waits on now (undefined = none). */
+export function __setEngineWaitingOnForTests(runId: string, command: string | undefined): void {
+  if (command === undefined) engineWaitingOn.delete(runId);
+  else engineWaitingOn.set(runId, command);
+}
+
 let backendForTests: EngineBackend | null | undefined;
 /** Test seam: the engine getEngineBackend() would return (undefined = the real one). */
 export function __setEngineApprovalBackendForTests(b: EngineBackend | null | undefined): void {
@@ -203,7 +214,8 @@ const NOTHING: EngineApprovalOutcome = { result: null, rerun: null };
  * Read this turn as the answer to the engine's ask. Runs before the parked-action resolution, and a
  * reply it settles (any yes or no) settles nothing else.
  *   • live, yes → 'once': cleared, or a late yes when the engine already stopped waiting, or (a failed
- *     POST) the marker stays and the reply says the go-ahead did not land;
+ *     POST) the marker stays and the reply says the go-ahead did not land. 'once' goes only while the
+ *     run still waits on the very command they were shown; otherwise it is a late yes, unposted;
  *   • live, no → 'deny', and the run remembers the step was turned down;
  *   • skipped, yes → the step's own fresh run, nothing posted; skipped, no → let go, nothing posted;
  *   • unclear → nothing moves; past the shared clock → dropped.
@@ -265,7 +277,10 @@ export async function resolveEngineApproval(
     rec({ decision: 'declined', state, outcome });
     return { result: { tool: 'engine_approval', status: 'done', target, detail: 'that step is refused and did not run; the look carries on without it' }, rerun: null };
   }
-  if (state === 'live') {
+  // 'once' clears whatever the run waits on NOW, so it is posted only while that is the command they
+  // were shown. Any other, or none known (a restart), makes this a late yes of the one they saw.
+  const bound = engineWaitingOn.get(m.handle.runId) === m.command;
+  if (state === 'live' && bound) {
     const outcome = await answer(m.handle, 'once');
     if (outcome === 'resolved') {
       await dropMarker(a.sender, m);
@@ -280,7 +295,7 @@ export async function resolveEngineApproval(
   }
   await dropMarker(a.sender, m);
   const rerun = lateRerun(m, a.sender, now);
-  rec({ decision: 'late_yes', state, rerunId: rerun.id });
+  rec({ decision: 'late_yes', state, rerunId: rerun.id, ...(state === 'live' && !bound ? { unbound: true } : {}) });
   return { result: { tool: 'engine_approval', status: 'done', target, detail: 'that step had stopped waiting, so it is starting again as a fresh run of just that step' }, rerun };
 }
 
@@ -331,6 +346,7 @@ export function createEngineApprovalRelay(task: OpsTask, deps: {
     hooks: extendLeg => ({
       onApprovalRequest: req => {
         blocked.set(req.handle.runId, req);
+        engineWaitingOn.set(req.handle.runId, req.command);
         if (!task.preApproved?.includes(req.command) || preApprovedUsed.has(req.command)) return askAbout(req, extendLeg);
         preApprovedUsed.add(req.command);
         void answer(req.handle, 'once').then(outcome => {
@@ -341,6 +357,7 @@ export function createEngineApprovalRelay(task: OpsTask, deps: {
       },
       onApprovalSettled: (handle, how) => {
         blocked.delete(handle.runId);
+        engineWaitingOn.delete(handle.runId);
         const armed = arming.get(handle.runId) ?? Promise.resolve();
         arming.delete(handle.runId);
         void armed
