@@ -205,7 +205,7 @@ export function renderPendingEngineApproval(m: PendingEngineApprovalCtx, state: 
   const step = `${m.description ? `${oneLine(m.description)}, ` : ''}running: ${oneLine(m.command ?? '')}`;
   const both = competing ? `\nBoth this step and "${competing}" are waiting on their yes. A bare yes could mean either and runs nothing, so ask them which one they mean, naming each.` : '';
   if (state === 'timed_out') {
-    return `## A step of your look was skipped while it waited on their OK\nWhile looking into "${m.request}", their ${engine} stopped before one step and waited for their word: ${step}. No answer came in time, so that step did not run.\nA yes from them still gets it done, as a fresh run of that step. A no lets it go. If they reply about something else, answer that normally.${both}`;
+    return `## A step of your look was skipped while it waited on their OK\nWhile looking into "${m.request}", their ${engine} stopped before one step and waited for their word: ${step}. No answer came in time, so that step did not run.\nA yes from them still gets it done, as a fresh run of that step. A no lets it go. A reply that is not a clear yes or no to this step runs nothing; when theirs leaves it unsettled, ask them plainly whether it should run. If they reply about something else, answer that normally.${both}`;
   }
   const ago = formatAgo(typeof m.askedAt === 'number' ? Math.floor(m.askedAt / 1000) : undefined, nowMs);
   const when = ago ? ` (asked ${ago})` : '';

@@ -908,6 +908,8 @@ test('renderPendingEngineApproval: live holds the step on their word; skipped sa
   assert.match(skipped, /^## A step of your look was skipped while it waited on their OK/);
   assert.match(skipped, /did not run/);
   assert.match(skipped, /A yes from them still gets it done, as a fresh run of that step/);
+  assert.match(skipped, /A reply that is not a clear yes or no to this step runs nothing/);
+  assert.match(skipped, /ask them plainly whether it should run/);
   assert.doesNotMatch(skipped, /has NOT started/, 'that is the parked ask\'s line, about a different thing');
 });
 

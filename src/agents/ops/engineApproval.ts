@@ -99,6 +99,16 @@ async function replaceMarker(sender: string, seen: EngineApprovalMarker, next: E
 const dropMarker = (sender: string, seen: EngineApprovalMarker) => replaceMarker(sender, seen, null)
   .catch(err => console.error('[ops] failed to clear pending_engine_approval', err));
 
+// A skipped step reached them inside a message that told them of it, so a reply made only of these
+// acknowledges that message: it is no go. An explicit go word (yes, yeah, yep, go, do it, run it, go
+// ahead) is in neither list, so a reply carrying one is never read as an acknowledgement.
+const ACKNOWLEDGEMENTS = new Set(['ok', 'okay', 'k', 'kk', 'sure', 'cool', 'alright', 'fine', 'thanks', 'thank', 'you', 'thx', 'ty']);
+const ACK_FILLER = new Set(['and', 'so', 'got', 'it', 'good', 'great', 'nice', 'sounds', 'very', 'much']);
+function onlyAcknowledges(text: string): boolean {
+  const words = text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  return words.some(w => ACKNOWLEDGEMENTS.has(w)) && words.every(w => ACKNOWLEDGEMENTS.has(w) || ACK_FILLER.has(w));
+}
+
 /** POST their answer. Never throws: an engine with no route, or a dead one, is 'failed'. */
 async function answer(handle: EngineRunHandle, choice: 'once' | 'deny'): Promise<'resolved' | 'not_pending' | 'failed'> {
   const engine = backend();
@@ -218,6 +228,7 @@ const NOTHING: EngineApprovalOutcome = { result: null, rerun: null };
  *     run still waits on the very command they were shown; otherwise it is a late yes, unposted;
  *   • live, no → 'deny', and the run remembers the step was turned down;
  *   • skipped, yes → the step's own fresh run, nothing posted; skipped, no → let go, nothing posted;
+ *     a bare acknowledgement of a skipped step is unclear, never a yes;
  *   • unclear → nothing moves; past the shared clock → dropped.
  * Nothing moves either for a reply from another chat than the ask's, or one that predates the ask
  * (`receivedAt`, the newest text's arrival); a yes among them comes back as a `note` that it did not
@@ -249,12 +260,19 @@ export async function resolveEngineApproval(
   const elsewhere = a.chatId !== m.chatId ? 'it was sent in another chat'
     : a.receivedAt !== undefined && a.receivedAt < m.askedAt ? 'it came before the ask reached them'
     : null;
+  // Skipped, a bare acknowledgement is of the message that told them, never a go; live, the ask
+  // itself asked "go or no?", so an ok there answers it.
+  const acknowledges = state === 'timed_out' && onlyAcknowledges(a.text);
   if (elsewhere) {
-    const yes = (await resolveConsent(a.text, action)) === 'yes';
+    const yes = !acknowledges && (await resolveConsent(a.text, action)) === 'yes';
     rec({ decision: a.chatId !== m.chatId ? 'other_chat' : 'predates_ask', state, yes });
     return yes
       ? { ...NOTHING, note: { tool: 'engine_approval', status: 'unavailable', target: oneLine(m.command).slice(0, 80), detail: `that yes did not clear the step (${elsewhere}); the step is still waiting on a yes to the ask itself` } }
       : NOTHING;
+  }
+  if (acknowledges) {
+    rec({ decision: 'unclear', state, reason: 'acknowledgement' });
+    return NOTHING;
   }
   const consent = await resolveConsent(a.text, action);
   if (consent === 'unclear') {

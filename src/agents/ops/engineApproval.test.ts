@@ -598,3 +598,27 @@ test('a yes to a command its run has moved past posts nothing, and re-runs exact
   assert.ok(out.rerun?.engineActions?.[0].endsWith(JSON.stringify(REQ.command)));
   assert.equal(await engineApprovalWaiting(t.agentHandle), false);
 });
+
+test('a bare acknowledgement of a skipped step is no answer; a clear yes still re-runs it', async () => {
+  const t = mkTask();
+  const calls: Calls = [];
+  await armEngineApproval(t, REQ, quiet, 'hermes');
+  await markEngineApprovalTimedOut(t.agentHandle, REQ.handle.runId);
+  const ack = await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'ok thanks')));
+  assert.deepEqual(ack, { result: null, rerun: null }, 'thanks for telling me is not a go');
+  const last = getTraces().filter(e => e.label === 'ops:engine_approval' && e.taskId === t.id).at(-1)?.detail as { decision?: string; reason?: string } | undefined;
+  assert.equal(last?.decision, 'unclear');
+  assert.equal(last?.reason, 'acknowledgement');
+  assert.equal(await engineApprovalWaiting(t.agentHandle), true, 'the step still waits on a clear answer');
+  const yes = await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'yes')));
+  assert.ok(yes.rerun, 'a clear yes still gets it done');
+  assert.deepEqual(calls, [], 'nothing posted either way: the engine stopped waiting');
+});
+
+test('live, the ask itself asked go or no, so an ok answers it', async () => {
+  const t = mkTask();
+  const calls: Calls = [];
+  await armEngineApproval(t, REQ, quiet, 'hermes');
+  await withEngine('resolved', calls, () => waitingOn(REQ, () => resolveEngineApproval(reply(t, 'ok'))));
+  assert.deepEqual(calls, [[REQ.handle, 'once']]);
+});
