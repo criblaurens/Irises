@@ -27,14 +27,16 @@ export function looksLikeMiss(text: string | null | undefined): boolean {
 const NEXT_LINE = /^\s*NEXT\s*:/;
 
 /** The engine's NEXT line, lifted off its answer: the step it could take next, and the answer
- *  without it, so the composer never relays the engine's own suggestion raw. "none" is no step.
- *  Text with no NEXT line comes back as it was. PURE; exported for unit tests. */
+ *  without it, so the composer never relays the engine's own suggestion raw. The contract puts NEXT
+ *  after everything the run found, so the LAST such line is the step: an earlier one is a line quoted
+ *  from what it read. Every NEXT line comes off the answer. "none" is no step. Text with no NEXT
+ *  line comes back as it was. PURE; exported for unit tests. */
 export function splitNextLine(text: string): { summary: string; next?: string } {
   const lines = text.split('\n');
-  const at = lines.findIndex(l => NEXT_LINE.test(l));
-  if (at < 0) return { summary: text };
-  const step = lines[at].replace(NEXT_LINE, '').trim();
-  const summary = lines.filter((_, i) => i !== at).join('\n').trim();
+  const nextLines = lines.filter(l => NEXT_LINE.test(l));
+  if (!nextLines.length) return { summary: text };
+  const step = nextLines[nextLines.length - 1].replace(NEXT_LINE, '').trim();
+  const summary = lines.filter(l => !NEXT_LINE.test(l)).join('\n').trim();
   return step && !/^none\.?$/i.test(step) ? { summary, next: step } : { summary };
 }
 
