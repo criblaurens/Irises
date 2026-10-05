@@ -298,7 +298,8 @@ export interface EngineApprovalRelay {
  *    twice. It is also asked about as usual when that answer could not be delivered, while the
  *    engine still waits on it.
  *  • Otherwise the leg's clocks move out by the wait and the ask joins this person's line (one live
- *    at a time, state/opsCoordination.ts). A look they called off asks nothing.
+ *    at a time, state/opsCoordination.ts). A look they called off asks nothing, and neither does an
+ *    ask whose run now waits on another command.
  *  • A wait that ends unanswered marks its ask skipped BEFORE the next in line is asked: the next ask
  *    writes the same marker, and that order is what keeps the newer one standing. A look they called
  *    off leaves no skipped step behind. Either waits for an ask still going out to be recorded.
@@ -308,7 +309,9 @@ export function createEngineApprovalRelay(task: OpsTask, deps: {
   send: (chatId: string, text: string) => Promise<unknown>;
   engineName: string;
 }): EngineApprovalRelay {
-  const blocked = new Set<string>();
+  // The request each blocked run waits on now. By identity, not run: one run asks again after its
+  // first wait ends, and an ask still queued for the first command must then never go out.
+  const blocked = new Map<string, EngineApprovalRequest>();
   const preApprovedUsed = new Set<string>();
   // Each run's ask while it goes out (the send, then the marker), so a wait that ends meanwhile
   // settles after it: settled first, the ask would then write a live marker over the settling.
@@ -318,7 +321,7 @@ export function createEngineApprovalRelay(task: OpsTask, deps: {
     enqueueEngineAsk(task.agentHandle, {
       taskId: task.id, runId: req.handle.runId,
       arm: () => {
-        if (isOpsCancelled(task.chatId, task.id)) return;
+        if (isOpsCancelled(task.chatId, task.id) || blocked.get(req.handle.runId) !== req) return;
         arming.set(req.handle.runId, armEngineApproval(task, req, deps.send, deps.engineName)
           .catch(err => console.warn('[ops] engine approval ask failed', err)));
       },
@@ -327,13 +330,13 @@ export function createEngineApprovalRelay(task: OpsTask, deps: {
   return {
     hooks: extendLeg => ({
       onApprovalRequest: req => {
-        blocked.add(req.handle.runId);
+        blocked.set(req.handle.runId, req);
         if (!task.preApproved?.includes(req.command) || preApprovedUsed.has(req.command)) return askAbout(req, extendLeg);
         preApprovedUsed.add(req.command);
         void answer(req.handle, 'once').then(outcome => {
           record({ type: 'event', label: 'ops:engine_approval', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, detail: { decision: 'pre_approved', runId: req.handle.runId, outcome } });
           // Only while the engine still waits on it: a run it already settled takes no place in line.
-          if (outcome === 'failed' && blocked.has(req.handle.runId)) askAbout(req, extendLeg);
+          if (outcome === 'failed' && blocked.get(req.handle.runId) === req) askAbout(req, extendLeg);
         }).catch(err => console.warn('[ops] failed to relay the pre-approved engine ask', err));
       },
       onApprovalSettled: (handle, how) => {

@@ -551,3 +551,19 @@ test('a relay step that fails says so in the log', async () => {
   }
   assert.ok(warned.some(w => /pre-approved/.test(w)), `warned: ${JSON.stringify(warned)}`);
 });
+
+test('a queued ask its run has moved past sends nothing: the run now waits on another command', async () => {
+  __resetOpsCoordination();
+  const t0 = mkTask(); const t = mkTask({ agentHandle: t0.agentHandle });
+  const sent: string[] = [];
+  const first = relayFor(t0, sent, []);
+  first.hooks.onApprovalRequest(runB);
+  await flush();
+  const { hooks } = relayFor(t, sent, []);
+  const cmd2 = { ...REQ, command: 'rm -rf ~/elsewhere' };
+  hooks.onApprovalRequest(REQ);
+  hooks.onApprovalRequest(cmd2);
+  first.hooks.onApprovalSettled(runB.handle, 'answered');
+  await flush();
+  assert.ok(!sent.includes(renderEngineApprovalAsk(REQ, 'hermes')), 'the first command is never asked: a yes to it would clear the second');
+});
