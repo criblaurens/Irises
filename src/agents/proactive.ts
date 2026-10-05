@@ -26,7 +26,10 @@ import { listRecentReminders, PROACTIVE_REMINDER_MAX_AGE_MS } from '../db/reposi
 import { timestampLabel } from '../pipeline/chatTime.js';
 
 // `proactive_deliveries.kind` is a bare TEXT column with no CHECK, so a new kind needs no migration.
-export type ProactiveKind = 'reminder' | 'email' | 'memo' | 'update' | 'callback' | 'introduction' | 'musing';
+export type ProactiveKind = 'reminder' | 'email' | 'memo' | 'update' | 'callback' | 'introduction' | 'musing' | 'checkin';
+
+/** The check-in's payload (memory/threadPings.ts sends it when the back-off asks). */
+export const CHECKIN_PAYLOAD = 'whether they still want you texting them first';
 
 export interface ProactivePayload {
   kind: ProactiveKind;
@@ -65,6 +68,8 @@ const COMPOSER_FRAMING: Record<ProactiveKind, string> = {
   // The payload is a seed to grow a thought from, never a fact to hand over, which is why the
   // instruction below labels it as a seed instead of as what she is delivering.
   musing: "no one texted you and nothing of theirs came due: this one starts with you, because something is on your mind. the line below is a seed, a thing you hold, or a thing you keep about them, or a thread of theirs, and what you send is a thought grown from it: a take, a thing you keep turning over, something that connects to them. the seed itself stays unread; they only ever see the thought. one or two short bubbles, and end somewhere they can jump in; a question may end it, or a statement with room after it. never a service offer, never a check-in, and never announce that they were on your mind, the thought itself is the proof. never a reminder, and nothing sensitive: if the seed touches their body, health, family, or anything they did not choose, leave it and send nothing.",
+  // The back-off's one ask (memory/proactiveBackoff.ts).
+  checkin: "no one texted you, and the last few texts you started have gone unanswered. this one asks them, once, whether they still want you starting conversations at all. one short beat in your own register, then the question, flat, and it ends your message. keep no score: no count, no recap of what went unanswered, no guilt, no pleading, no promise about what happens next, and no hurt in it. their answer, or no answer, settles it.",
 };
 
 /** The Fallfirm framings for the same six moments — the degrade path when the Composer's own
@@ -80,6 +85,7 @@ const FALLFIRM_FRAMING: Record<ProactiveKind, string> = {
   // Fallfirm path relays its payload as facts and a seed read out verbatim is the one thing a musing
   // must never be. Present because the map is total over the kinds.
   musing: 'something of yours is on your mind: one short thought of your own, and stop',
+  checkin: 'you are asking once whether they still want you texting first: one flat line, no guilt, and stop',
 };
 
 /** The Outcome Fallfirm voices when the Composer could not. `framing` from the caller (the update
