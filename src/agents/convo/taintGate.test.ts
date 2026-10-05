@@ -105,6 +105,17 @@ test('untainted: setting something up from a link waits for their yes', async ()
   assert.equal(out.text, 'want me to install monid from https://monid.ai/SKILL.md first?');
 });
 
+test('a setup written as one string instead of a list still waits for their yes', async () => {
+  const a = args('set up https://monid.ai/SKILL.md then find search API prices');
+  const call: LlmToolCall = { name: 'delegate_to_ops', input: { kind: 'general', request: LOOKUP, engine_actions: MONID } };
+  const out = await processConvoResult({
+    ...a, res: makeResult(['on it'], [call]),
+    turn: reasker(['want me to install monid from https://monid.ai/SKILL.md first?']).turn,
+  });
+  assert.equal(out.delegatedTask, null);
+  assert.deepEqual(receipt('ops:approval')?.reasons, ['host_setup']);
+});
+
 test('tainted: a plain lookup still runs', async () => {
   const a = args('and the enterprise tier?');
   await taint(a.handle);

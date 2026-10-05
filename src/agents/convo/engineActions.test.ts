@@ -109,7 +109,8 @@ test('a run that was asked for no action carries the field not at all', () => {
 });
 
 test('a garbled or empty actions argument leaves the field off rather than tracking nothing', async () => {
-  for (const engine_actions of [[], ['', '   '], 'set it up', 7, null]) {
+  // A lone non-blank string is one action, not garbage (convo/taintGate.test.ts pins that it is gated).
+  for (const engine_actions of [[], ['', '   '], '   ', 7, null]) {
     const a = args('go find that');
     const out = await processConvoResult({
       ...a,

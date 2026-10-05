@@ -697,6 +697,17 @@ type ResearchPick =
   | { kind: 'none' };
 
 /**
+ * The `engine_actions` argument as a list. A lane writing its tool calls inside the JSON envelope
+ * is not held to the schema and sometimes sends one action as a bare string; that string is one
+ * action, and reading it as none would let a setup past the gate while the request still carries
+ * it to the engine. Blank or any other shape is none.
+ */
+function readEngineActions(value: unknown): string[] {
+  if (typeof value === 'string') return value.trim() ? [value.trim()] : [];
+  return Array.isArray(value) ? value.map(a => String(a ?? '').trim()).filter(Boolean) : [];
+}
+
+/**
  * The one running lookup a cancel_research or steer_research call names, shared by both so the two
  * can never read the same words differently. The id first (resolveRef over the task ids a short
  * `L…` id is a prefix of), then the words against each run's request. The match arg is tried as an
@@ -3632,13 +3643,11 @@ async function dispatchToolCalls(calls: LlmToolCall[], effects: TurnEffects, ctx
       if (opsKind !== requestedKind) console.warn(`[convo] delegate_to_ops kind "${requestedKind}" is not a TaskKind — coerced to 'general'`);
       const opsRequest = String(input.request ?? textToSend);
       // The acting half of the ask, read as a list of its own so nothing it carries can be lost to
-      // `request`'s single-ask distillation. Strict: anything that is not an array of real strings
-      // leaves the field OFF rather than tracking a half-truth — the honesty surfaces downstream
-      // read this as "what was really handed over", so an empty or garbled one must read as nothing
-      // asked, never as something asked and forgotten.
-      const engineActions = Array.isArray(input.engine_actions)
-        ? input.engine_actions.map(a => String(a ?? '').trim()).filter(Boolean)
-        : [];
+      // `request`'s single-ask distillation. A lone string is one action (readEngineActions); blank
+      // or any other shape leaves the field OFF rather than tracking a half-truth — the honesty
+      // surfaces downstream read this as "what was really handed over", so an empty or garbled one
+      // must read as nothing asked, never as something asked and forgotten.
+      const engineActions = readEngineActions(input.engine_actions);
       // Would the ENGINE change something outside Irises to do this? Two sources, either sufficient:
       // the model's own `effect` tag (it reads every language) and the English phrase list
       // (agents/ops/sideEffects.ts). Read here, on the request as it will actually be sent, so the
@@ -3833,9 +3842,7 @@ async function dispatchToolCalls(calls: LlmToolCall[], effects: TurnEffects, ctx
       // Same chat-scoped, synchronous map as the cancel above, and for the same reason: her ack goes
       // out this turn, so the decision has to be in hand before it does. The delivery POST itself is
       // dispatched inside and never awaited (see steerResearch).
-      const steerActions = Array.isArray(input.engine_actions)
-        ? input.engine_actions.map(a => String(a ?? '').trim()).filter(Boolean)
-        : [];
+      const steerActions = readEngineActions(input.engine_actions);
       // A steered action that would wait for a yes as a delegation waits here too. The run is
       // already going and cannot pause for it, so the actions are parked as a look of their own and
       // asked about, and the steer carries the words alone. With a park or a look already standing
