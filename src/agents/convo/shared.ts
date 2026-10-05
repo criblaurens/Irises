@@ -3880,7 +3880,7 @@ async function dispatchToolCalls(calls: LlmToolCall[], effects: TurnEffects, ctx
             console.warn(`[convo] dropped a steer that needs a yes; a park or a look already stands this turn (chat ${chatId})`);
             effects.results.push({
               tool: 'steer_research', status: 'unavailable', target: (guidance || steerActions.join('; ')).slice(0, 80),
-              detail: 'this addition needs their yes before any of it runs, and another question already stands this turn, so it was not passed on to the running look',
+              detail: 'this addition needs their yes before any of it runs, and another ask or look already stands this turn, so it was not passed on to the running look',
               nextStep: 'ask them about it once the current question is settled',
             });
           }
