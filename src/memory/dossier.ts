@@ -190,7 +190,7 @@ export function gatePendingEngineApproval(m: PendingEngineApprovalCtx | undefine
 }
 
 /** Engine-sourced text rendered into a prompt sits on one line, so it can never open a heading. */
-const oneLine = (text: string): string => text.replace(/\s*[\r\n]+\s*/g, ' / ');
+export const oneLine = (text: string): string => text.replace(/\s*[\r\n]+\s*/g, ' / ');
 
 /**
  * The engine's-ask section. Live: a look of hers is paused on one step, named exactly, and nothing of

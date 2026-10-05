@@ -26,7 +26,7 @@ import {
   getEngineBackend, engineApprovalRelayEnabled, ENGINE_APPROVAL_WAIT_MS,
   type EngineApprovalRequest, type EngineBackend, type EngineRunHandle, type EngineRunContext,
 } from './engineBackend.js';
-import { gatePendingEngineApproval } from '../../memory/dossier.js';
+import { gatePendingEngineApproval, oneLine } from '../../memory/dossier.js';
 import { noteEngineAskDeclined, enqueueEngineAsk, settleEngineAsk, isOpsCancelled } from '../../state/opsCoordination.js';
 import { record } from '../../diagnostics/trace.js';
 import { emptyMedia } from '../../webhook/types.js';
@@ -176,7 +176,8 @@ function lateRerun(m: EngineApprovalMarker, sender: string, now: number): OpsTas
   return {
     id: randomUUID(), chatId: m.chatId, agentHandle: sender, kind: m.kind,
     request: `the one step that was held for their OK while working on "${m.request}"`,
-    engineActions: [`run exactly this command and nothing else, then report what it did: ${m.command}`],
+    // As a JSON string: a newline in the command can then never open an action line of its own.
+    engineActions: [`run exactly this command (given as a JSON string) and nothing else, then report what it did: ${JSON.stringify(m.command)}`],
     effect: m.effect,
     ...(m.effect === 'act' ? { approval: { askedAt: m.askedAt, approvedAt: now } } : {}),
     preApproved: [m.command], followUpOf: m.taskId, createdAt: now, media: emptyMedia(),
@@ -240,7 +241,7 @@ export async function resolveEngineApproval(
     const yes = (await resolveConsent(a.text, action)) === 'yes';
     rec({ decision: a.chatId !== m.chatId ? 'other_chat' : 'predates_ask', state, yes });
     return yes
-      ? { ...NOTHING, note: { tool: 'engine_approval', status: 'unavailable', target: m.command.slice(0, 80), detail: `that yes did not clear the step (${elsewhere}); the step is still waiting on a yes to the ask itself` } }
+      ? { ...NOTHING, note: { tool: 'engine_approval', status: 'unavailable', target: oneLine(m.command).slice(0, 80), detail: `that yes did not clear the step (${elsewhere}); the step is still waiting on a yes to the ask itself` } }
       : NOTHING;
   }
   const consent = await resolveConsent(a.text, action);
@@ -252,7 +253,7 @@ export async function resolveEngineApproval(
     rec({ decision: 'ambiguous', state });
     return { result: null, rerun: null, ambiguous: true };
   }
-  const target = m.command.slice(0, 80);
+  const target = oneLine(m.command).slice(0, 80);
   if (consent === 'no') {
     noteEngineAskDeclined(m.chatId, m.taskId);
     await dropMarker(a.sender, m);
