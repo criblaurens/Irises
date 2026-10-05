@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   armEngineApproval, resolveEngineApproval, markEngineApprovalTimedOut, clearEngineApproval,
-  engineApprovalWaiting, renderEngineApprovalAsk, __setEngineApprovalBackendForTests,
+  engineApprovalWaiting, renderEngineApprovalAsk, __setEngineApprovalBackendForTests, ENGINE_ASK_MAX_COMMAND_CHARS,
 } from './engineApproval.js';
 import type { EngineBackend, EngineRunHandle } from './engineBackend.js';
 import { __setConsentLlmForTests } from './consent.js';
@@ -14,8 +14,10 @@ import { PENDING_ASK_TTL_MS } from '../../memory/dossier.js';
 import { markOpsStart, engineAskDeclined, __resetOpsCoordination } from '../../state/opsCoordination.js';
 import { emptyMedia } from '../../webhook/types.js';
 import type { OpsTask } from '../types.js';
+import { getTraces } from '../../diagnostics/trace.js';
 
-__setConsentLlmForTests(async () => ({ text: 'UNCLEAR', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' }));
+const unclearLane = async () => ({ text: 'UNCLEAR', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' });
+__setConsentLlmForTests(unclearLane);
 
 const REQ = { handle: { engine: 'hermes' as const, runId: 'run_x' }, command: 'rm -rf ~/scratch', description: 'recursive delete' };
 let seq = 0;
@@ -23,22 +25,53 @@ function mkTask(over: Partial<OpsTask> = {}): OpsTask {
   const n = (seq++).toString().padStart(4, '0');
   return { id: `t${n}`, chatId: `c${n}`, agentHandle: `+1555934${n}`, kind: 'general', request: 'clear out my scratch folder', effect: 'read', createdAt: Date.now(), media: emptyMedia(), ...over };
 }
-const quiet = async () => {};
-const reply = (t: OpsTask, text: string) => ({ sender: t.agentHandle, text, chatId: t.chatId, handle: t.agentHandle });
+const quiet = async () => 'sent' as const;
+const reply = (t: OpsTask, text: string, extra: { receivedAt?: number; competing?: string } = {}) => ({ sender: t.agentHandle, text, chatId: t.chatId, handle: t.agentHandle, ...extra });
+/** The receipts this module wrote for one task, in order. */
+const decisions = (taskId: string) => getTraces().filter(e => e.label === 'ops:engine_approval' && e.taskId === taskId).map(e => (e.detail as { decision?: string } | undefined)?.decision);
 type Calls = Array<[EngineRunHandle, string]>;
 async function withEngine<T>(outcome: 'resolved' | 'not_pending' | 'failed', calls: Calls, fn: () => Promise<T>): Promise<T> {
   __setEngineApprovalBackendForTests({ resolveRunApproval: async (h: EngineRunHandle, c: 'once' | 'deny') => { calls.push([h, c]); return outcome; } } as unknown as EngineBackend);
   try { return await fn(); } finally { __setEngineApprovalBackendForTests(undefined); }
 }
 
-test('the ask goes out with the command exactly as the engine reported it, and the marker is written first', async () => {
+test('the ask goes out with the command exactly as the engine reported it, and no marker stands until it is confirmed sent', async () => {
   const t = mkTask();
   const sent: string[] = [];
-  let standingAtSend = false;
-  await armEngineApproval(t, REQ, async (_chat, text) => { standingAtSend = await engineApprovalWaiting(t.agentHandle); sent.push(text); }, 'hermes');
+  let standingAtSend = true;
+  await armEngineApproval(t, REQ, async (_chat, text) => { standingAtSend = await engineApprovalWaiting(t.agentHandle); sent.push(text); return 'sent' as const; }, 'hermes');
   assert.deepEqual(sent, [renderEngineApprovalAsk(REQ, 'hermes')]);
   assert.match(sent[0], /^your hermes wants to run this before it carries on \(recursive delete\)\nrm -rf ~\/scratch\ngo or no\?$/);
-  assert.equal(standingAtSend, true, 'a reply racing the send still finds it');
+  assert.equal(standingAtSend, false, 'nothing to answer before the ask is on their screen');
+  assert.equal(await engineApprovalWaiting(t.agentHandle), true);
+  assert.deepEqual(decisions(t.id), ['requested']);
+});
+
+test('an ask that was dropped or failed to send leaves no marker, so no reply can answer it', async () => {
+  const dropped = mkTask();
+  await armEngineApproval(dropped, REQ, async () => 'dropped' as const, 'hermes');
+  assert.equal(await engineApprovalWaiting(dropped.agentHandle), false);
+  assert.deepEqual(decisions(dropped.id), ['ask_not_sent']);
+
+  const threw = mkTask();
+  await armEngineApproval(threw, REQ, async () => { throw new Error('transport down'); }, 'hermes');
+  assert.equal(await engineApprovalWaiting(threw.agentHandle), false);
+  assert.deepEqual(decisions(threw.id), ['ask_not_sent']);
+});
+
+test('a command is shown in full up to the cap, and one past it is never relayed', async () => {
+  const atCap = mkTask();
+  const full = { ...REQ, command: 'x'.repeat(ENGINE_ASK_MAX_COMMAND_CHARS) };
+  const sent: string[] = [];
+  await armEngineApproval(atCap, full, async (_c, text) => { sent.push(text); return 'sent' as const; }, 'hermes');
+  assert.ok(sent[0]?.includes(full.command), 'the whole command, uncut');
+
+  const over = mkTask();
+  sent.length = 0;
+  await armEngineApproval(over, { ...REQ, command: 'x'.repeat(ENGINE_ASK_MAX_COMMAND_CHARS + 1) }, async (_c, text) => { sent.push(text); return 'sent' as const; }, 'hermes');
+  assert.deepEqual(sent, [], 'not sent: the engine\'s own timeout refuses it');
+  assert.equal(await engineApprovalWaiting(over.agentHandle), false);
+  assert.deepEqual(decisions(over.id), ['not_relayed_too_long']);
 });
 
 test('a yes lets that one command run once, and the ask is gone', async () => {
@@ -83,11 +116,13 @@ test('a yes that cannot reach the engine keeps the ask and says the go-ahead did
   assert.equal(await engineApprovalWaiting(t.agentHandle), true, 'their next yes can try again');
 });
 
-test('a yes after the engine stopped waiting comes back as a fresh run of just that step', async () => {
+test('a yes after the engine stopped waiting comes back as a fresh run of exactly that command', async () => {
   const t = mkTask({ kind: 'compute', effect: 'act', approval: { askedAt: 1, approvedAt: 2 }, engineActions: ['install the cleaner skill'], room: true });
   const calls: Calls = [];
-  await armEngineApproval(t, REQ, quiet, 'hermes');
-  const out = await withEngine('not_pending', calls, () => resolveEngineApproval(reply(t, 'yes')));
+  const askedAt = Date.now() - 60_000;
+  await armEngineApproval(t, REQ, quiet, 'hermes', askedAt);
+  const now = Date.now();
+  const out = await withEngine('not_pending', calls, () => resolveEngineApproval(reply(t, 'yes'), now));
   const r = out.rerun!;
   assert.ok(r, 'a re-run was built');
   assert.notEqual(r.id, t.id);
@@ -97,13 +132,22 @@ test('a yes after the engine stopped waiting comes back as a fresh run of just t
   assert.equal(r.followUpOf, t.id);
   assert.equal(r.kind, 'compute');
   assert.equal(r.effect, 'act');
-  assert.deepEqual(r.approval, { askedAt: 1, approvedAt: 2 }, 'an approved act keeps its AUTHORIZED ACTION line');
+  assert.deepEqual(r.approval, { askedAt, approvedAt: now }, 'their late yes approves that step, now');
   assert.equal(r.room, true);
-  assert.equal(r.engineActions, undefined, 'the first run already did its setup');
-  assert.match(r.request, /held waiting on their OK while working on "clear out my scratch folder"/);
-  assert.match(r.request, /rm -rf ~\/scratch/);
+  assert.deepEqual(r.engineActions, ['run exactly this command and nothing else, then report what it did: rm -rf ~/scratch'], 'the command alone; the first run already did its setup');
+  assert.equal(r.request, 'the one step that was held for their OK while working on "clear out my scratch folder"');
+  assert.doesNotMatch(r.request, /rm -rf|recursive delete/, 'engine text never rides in the request');
   assert.equal(out.result?.status, 'done');
   assert.equal(await engineApprovalWaiting(t.agentHandle), false);
+});
+
+test('a late yes on a read re-runs the step with no approval line', async () => {
+  const t = mkTask({ approval: { askedAt: 1, approvedAt: 2 } });
+  await armEngineApproval(t, REQ, quiet, 'hermes');
+  await markEngineApprovalTimedOut(t.agentHandle, REQ.handle.runId);
+  const out = await withEngine('resolved', [], () => resolveEngineApproval(reply(t, 'yes')));
+  assert.equal(out.rerun?.effect, 'read');
+  assert.equal(out.rerun?.approval, undefined);
 });
 
 test('a yes to a skipped step re-runs it without asking the engine', async () => {
@@ -175,4 +219,46 @@ test('with the relay off nothing is read, answered or dropped', async () => {
   }
   assert.deepEqual(calls, []);
   assert.equal(await engineApprovalWaiting(t.agentHandle), true, 'the marker was left exactly as it was');
+});
+
+test('a reply sent before the ask went out answers nothing', async () => {
+  const t = mkTask();
+  const calls: Calls = [];
+  await armEngineApproval(t, REQ, quiet, 'hermes');
+  const out = await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'yes', { receivedAt: Date.now() - 60_000 })));
+  assert.deepEqual(out, { result: null, rerun: null });
+  assert.deepEqual(calls, []);
+  assert.equal(await engineApprovalWaiting(t.agentHandle), true);
+  assert.equal(decisions(t.id).at(-1), 'predates_ask');
+});
+
+test('a yes that also answers a parked approval ask settles neither and posts nothing', async () => {
+  const t = mkTask();
+  const calls: Calls = [];
+  await armEngineApproval(t, REQ, quiet, 'hermes');
+  const out = await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'yes', { competing: 'send the invoice to accounts' })));
+  assert.deepEqual(out, { result: null, rerun: null, ambiguous: true });
+  assert.deepEqual(calls, []);
+  assert.equal(await engineApprovalWaiting(t.agentHandle), true, 'still waiting for a yes that names it');
+  assert.equal(decisions(t.id).at(-1), 'ambiguous');
+});
+
+test('the consent reader is shown a code-written action, never the engine\'s raw command', async () => {
+  const t = mkTask();
+  const seen: string[] = [];
+  __setConsentLlmForTests(async (req) => {
+    seen.push(JSON.stringify(req.messages));
+    return { text: 'YES', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' };
+  });
+  try {
+    await armEngineApproval(t, REQ, quiet, 'hermes');
+    const calls: Calls = [];
+    await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'sure thing, go ahead with it')));
+    assert.equal(seen.length, 1, 'the lane read it');
+    assert.ok(!seen[0].includes('rm -rf'), 'no engine command in the classify prompt');
+    assert.ok(seen[0].includes('let their hermes run the one step it paused on (recursive delete)'));
+    assert.deepEqual(calls, [[REQ.handle, 'once']]);
+  } finally {
+    __setConsentLlmForTests(unclearLane);
+  }
 });

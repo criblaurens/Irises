@@ -189,21 +189,27 @@ export function gatePendingEngineApproval(m: PendingEngineApprovalCtx | undefine
   return m.timedOut || nowMs - m.askedAt > ENGINE_APPROVAL_WAIT_MS ? 'timed_out' : 'live';
 }
 
+/** Engine-sourced text rendered into a prompt sits on one line, so it can never open a heading. */
+const oneLine = (text: string): string => text.replace(/\s*[\r\n]+\s*/g, ' / ');
+
 /**
  * The engine's-ask section. Live: a look of hers is paused on one step, named exactly, and nothing of
  * that step runs until they answer; a no that names another way can steer the look with it.
  * Timed out: that step was skipped, and a yes still gets it done as a fresh run. The step is the
- * engine's own wording and command (already redacted by it).
+ * engine's own wording and command (already redacted by it), flattened onto one line.
+ * `competing` is the request of a parked approval ask that is also live: a yes could then mean
+ * either, and runs neither (ops/engineApproval.ts), so she asks which one.
  */
-export function renderPendingEngineApproval(m: PendingEngineApprovalCtx, state: 'live' | 'timed_out', nowMs: number): string {
+export function renderPendingEngineApproval(m: PendingEngineApprovalCtx, state: 'live' | 'timed_out', nowMs: number, competing?: string): string {
   const engine = m.handle?.engine ?? 'engine';
-  const step = `${m.description ? `${m.description}, ` : ''}running: ${m.command}`;
+  const step = `${m.description ? `${oneLine(m.description)}, ` : ''}running: ${oneLine(m.command ?? '')}`;
+  const both = competing ? `\nBoth this step and "${competing}" are waiting on their yes. A bare yes could mean either and runs nothing, so ask them which one they mean, naming each.` : '';
   if (state === 'timed_out') {
-    return `## A step of your look was skipped while it waited on their OK\nWhile looking into "${m.request}", their ${engine} stopped before one step and waited for their word: ${step}. No answer came in time, so that step did not run.\nA yes from them still gets it done, as a fresh run of that step. A no lets it go. If they reply about something else, answer that normally.`;
+    return `## A step of your look was skipped while it waited on their OK\nWhile looking into "${m.request}", their ${engine} stopped before one step and waited for their word: ${step}. No answer came in time, so that step did not run.\nA yes from them still gets it done, as a fresh run of that step. A no lets it go. If they reply about something else, answer that normally.${both}`;
   }
   const ago = formatAgo(typeof m.askedAt === 'number' ? Math.floor(m.askedAt / 1000) : undefined, nowMs);
   const when = ago ? ` (asked ${ago})` : '';
-  return `## Their ${engine} paused your look on a step that needs their OK (their next reply is probably the answer)\nWhile looking into "${m.request}", their ${engine} stopped before this step and is waiting for their word${when}: ${step}. Nothing of that step runs until they answer.\nA yes lets that one step run. A no refuses it, and when their no names another way to do it, steer the running look with that way (steer_research). If they reply about something else, answer that normally; the step keeps waiting.`;
+  return `## Their ${engine} paused your look on a step that needs their OK (their next reply is probably the answer)\nWhile looking into "${m.request}", their ${engine} stopped before this step and is waiting for their word${when}: ${step}. Nothing of that step runs until they answer.\nA yes lets that one step run. A no refuses it, and when their no names another way to do it, steer the running look with that way (steer_research). A reply that is not a clear yes or no to this step runs nothing; when theirs leaves it unsettled, ask them plainly whether it should run. If they reply about something else, answer that normally; the step keeps waiting.${both}`;
 }
 
 interface PendingEmailContext {
@@ -358,7 +364,10 @@ export async function buildContextBlockWithHot(
   // while it waited. No topic gate, for the same reason the approval ask has none.
   const engineAsk = prefs.pending_engine_approval as PendingEngineApprovalCtx | undefined;
   const engineAskState = gatePendingEngineApproval(engineAsk, nowMs);
-  if (engineAskState) parts.push(renderPendingEngineApproval(engineAsk as PendingEngineApprovalCtx, engineAskState, nowMs));
+  if (engineAskState) {
+    const competing = approvalLive ? (approval as PendingApprovalCtx).request : undefined;
+    parts.push(renderPendingEngineApproval(engineAsk as PendingEngineApprovalCtx, engineAskState, nowMs, competing));
+  }
 
   // The same two verdicts, read once more as ONE fact for the idle gate: an outstanding question of
   // hers makes their next short message an answer rather than a stall. Taken off the gates rather

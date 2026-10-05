@@ -8,10 +8,13 @@
 // park uses (ops/consent.ts).
 //
 // FAIL-CLOSED: an unread reply leaves the engine waiting until its own timeout, which REFUSES; a
-// failed POST leaves the same. Only an unambiguous yes answers, and only with 'once', so every later
-// dangerous command gets its own question. A yes that lands after the engine stopped waiting (its
-// window closed, or the run ended) re-runs just that step as a fresh task, whose own ask for the
-// same command is answered without asking twice (OpsTask.preApproved).
+// failed POST leaves the same. So does every ask that is not answerable: one never confirmed on
+// their screen, one whose marker failed to save, and one too long to show whole. Only an
+// unambiguous yes answers, and only with 'once', so every later dangerous command gets its own
+// question. A reply that predates the ask answers nothing, and a yes that could equally mean a
+// parked approval ask answers neither. A yes that lands after the engine stopped waiting (its
+// window closed, or the run ended) re-runs exactly that command as a fresh task, whose own ask for
+// it is answered without asking twice (OpsTask.preApproved).
 //
 // OPS_ENGINE_APPROVAL_RELAY=off (ops/engineBackend.ts) is the behaviour before this module: nothing
 // here reads, answers or drops a marker, and the orchestrator hooks nothing.
@@ -31,8 +34,10 @@ import type { ActionResult } from '../convo/actionResults.js';
 import type { OpsTask, TaskKind } from '../types.js';
 
 export const ENGINE_APPROVAL_PREF = 'pending_engine_approval';
-/** Past this the command is cut on screen. The engine already redacted any secret in it. */
-const COMMAND_SHOWN_CHARS = 300;
+/** The longest command that is relayed. The ask always shows the command whole (the engine already
+ *  redacted any secret in it); past this it is not asked at all, and the engine's own timeout
+ *  refuses it. */
+export const ENGINE_ASK_MAX_COMMAND_CHARS = 1000;
 
 /** The ask as it sits on the person's prefs. Everything a late yes needs to re-run the step is here,
  *  because by then the task that asked may be long gone. */
@@ -46,7 +51,6 @@ export interface EngineApprovalMarker {
   request: string;
   kind: TaskKind;
   effect: OpsTask['effect'];
-  approval?: OpsTask['approval'];
   room?: true;
   /** The run moved on without their answer; the step did not run (markEngineApprovalTimedOut). */
   timedOut?: true;
@@ -59,12 +63,11 @@ export function __setEngineApprovalBackendForTests(b: EngineBackend | null | und
 }
 const backend = (): EngineBackend | null => (backendForTests !== undefined ? backendForTests : getEngineBackend());
 
-/** The ask, in her register: the engine is THEIRS ("your hermes"), the command sits on its own line
- *  (the bubble splitter breaks at newlines), and the question is the last line. */
+/** The ask, in her register: the engine is THEIRS ("your hermes"), the command sits whole on its own
+ *  line (the bubble splitter breaks at newlines), and the question is the last line. */
 export function renderEngineApprovalAsk(req: { command: string; description: string }, engineName: string): string {
-  const cmd = req.command.length > COMMAND_SHOWN_CHARS ? `${req.command.slice(0, COMMAND_SHOWN_CHARS)}…` : req.command;
   const why = req.description ? ` (${req.description})` : '';
-  return `your ${engineName} wants to run this before it carries on${why}\n${cmd}\ngo or no?`;
+  return `your ${engineName} wants to run this before it carries on${why}\n${req.command}\ngo or no?`;
 }
 
 async function readMarker(sender: string): Promise<EngineApprovalMarker | undefined> {
@@ -89,25 +92,48 @@ export async function engineApprovalWaiting(sender: string, now: number = Date.n
   return gatePendingEngineApproval(await readMarker(sender), now) !== null;
 }
 
-/** Record the ask and send it. The marker is written FIRST, so a reply racing the send still finds
- *  it. Only ever called with the person's line free (state/opsCoordination.ts enqueueEngineAsk). */
+/** Send the ask, then record it. The marker is written only once the send resolves 'sent', with
+ *  `askedAt` taken after it, so no reply can answer an ask that never reached their screen and no
+ *  reply sent before it can answer it either. Any other way out leaves no marker: the engine's own
+ *  timeout refuses the command. Never throws. Only ever called with the person's line free
+ *  (state/opsCoordination.ts enqueueEngineAsk). */
 export async function armEngineApproval(
   task: OpsTask,
   req: EngineApprovalRequest,
   send: (chatId: string, text: string) => Promise<unknown>,
   engineName: string,
-  now: number = Date.now(),
+  now?: number,
 ): Promise<void> {
+  const rec = (detail: Record<string, unknown>) => record({
+    type: 'event', label: 'ops:engine_approval', chatId: task.chatId, handle: task.agentHandle, taskId: task.id,
+    detail: { runId: req.handle.runId, ...detail },
+  });
+  if (req.command.length > ENGINE_ASK_MAX_COMMAND_CHARS) {
+    rec({ decision: 'not_relayed_too_long', chars: req.command.length });
+    return;
+  }
+  const sent = await send(task.chatId, renderEngineApprovalAsk(req, engineName)).catch(err => {
+    console.error('[ops] failed to send the engine approval ask', err);
+    return 'failed';
+  });
+  if (sent !== 'sent') {
+    rec({ decision: 'ask_not_sent', sent: String(sent) });
+    return;
+  }
   const marker: EngineApprovalMarker = {
     handle: req.handle, taskId: task.id, chatId: task.chatId, command: req.command, description: req.description,
-    askedAt: now, request: task.request, kind: task.kind, effect: task.effect,
-    ...(task.approval ? { approval: task.approval } : {}),
+    askedAt: now ?? Date.now(), request: task.request, kind: task.kind, effect: task.effect,
     ...(task.room ? { room: true as const } : {}),
   };
-  await setPreference(task.agentHandle, ENGINE_APPROVAL_PREF, marker)
-    .catch(err => console.error('[ops] failed to persist pending_engine_approval', err));
-  record({ type: 'event', label: 'ops:engine_approval', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, detail: { decision: 'requested', runId: req.handle.runId, description: req.description } });
-  await send(task.chatId, renderEngineApprovalAsk(req, engineName));
+  try {
+    await setPreference(task.agentHandle, ENGINE_APPROVAL_PREF, marker);
+  } catch (err) {
+    // On their screen but unanswerable: the engine's own timeout refuses the command.
+    console.error('[ops] failed to persist pending_engine_approval', err);
+    rec({ decision: 'marker_lost' });
+    return;
+  }
+  rec({ decision: 'requested', description: req.description });
 }
 
 /** The run moved on without their answer: the engine refused the step on its own clock. The marker
@@ -128,16 +154,19 @@ export async function clearEngineApproval(sender: string, taskId: string, evenTi
   if (m && m.taskId === taskId && (evenTimedOut || !m.timedOut)) await dropMarker(sender);
 }
 
-/** The step a late yes gets done: a fresh task of its own carrying just that step. Kind, effect,
- *  chat and room are the original's, and so is its approval, so an act they already said yes to
- *  keeps its AUTHORIZED ACTION line. `preApproved` lets the re-run's own ask for the same command
- *  through without asking twice; `followUpOf` keeps it from offering a next step. Setup actions do
- *  not ride along: the first run already did them. */
+/** The step a late yes gets done: a fresh task of its own carrying exactly that command. Kind,
+ *  effect, chat and room are the original's. The request is code-written and carries no engine text;
+ *  the command rides as the one engine action, so the brief renders it in the instruction layer.
+ *  An act's late yes is that step's approval, given now; a read needs none. `preApproved` lets the
+ *  re-run's own ask for the same command through without asking twice; `followUpOf` keeps it from
+ *  offering a next step. The original's setup actions do not ride along: the first run did them. */
 function lateRerun(m: EngineApprovalMarker, sender: string, now: number): OpsTask {
   return {
     id: randomUUID(), chatId: m.chatId, agentHandle: sender, kind: m.kind,
-    request: `the one step that was held waiting on their OK while working on "${m.request}": ${m.description ? `${m.description}, ` : ''}by running ${m.command}`,
-    effect: m.effect, ...(m.approval ? { approval: m.approval } : {}),
+    request: `the one step that was held for their OK while working on "${m.request}"`,
+    engineActions: [`run exactly this command and nothing else, then report what it did: ${m.command}`],
+    effect: m.effect,
+    ...(m.effect === 'act' ? { approval: { askedAt: m.askedAt, approvedAt: now } } : {}),
     preApproved: [m.command], followUpOf: m.taskId, createdAt: now, media: emptyMedia(),
     ...(m.room ? { room: true } : {}),
   };
@@ -148,6 +177,8 @@ export interface EngineApprovalOutcome {
   result: ActionResult | null;
   /** A late yes: the step as a fresh task, for the one kickoff site (convo/shared.ts settledTask). */
   rerun: OpsTask | null;
+  /** Their yes could equally answer the parked approval ask (`competing`): neither ask may take it. */
+  ambiguous?: true;
 }
 const NOTHING: EngineApprovalOutcome = { result: null, rerun: null };
 
@@ -159,9 +190,12 @@ const NOTHING: EngineApprovalOutcome = { result: null, rerun: null };
  *   • live, no → 'deny', and the run remembers the step was turned down;
  *   • skipped, yes → the step's own fresh run, nothing posted; skipped, no → let go, nothing posted;
  *   • unclear → nothing moves; past the shared clock → dropped.
+ * Nothing moves either for a reply that predates the ask (`receivedAt`, the newest text's arrival),
+ * or for a yes that also reads as a yes to the parked approval ask (`competing`, its request): that
+ * comes back `ambiguous`, and the caller settles the parked ask with it no more than this one.
  */
 export async function resolveEngineApproval(
-  a: { sender: string; text: string; chatId: string; handle: string | undefined },
+  a: { sender: string; text: string; chatId: string; handle: string | undefined; receivedAt?: number; competing?: string },
   now: number = Date.now(),
 ): Promise<EngineApprovalOutcome> {
   if (!engineApprovalRelayEnabled()) return NOTHING;
@@ -177,10 +211,20 @@ export async function resolveEngineApproval(
     rec({ decision: 'lapsed' });
     return NOTHING;
   }
-  const consent = await resolveConsent(a.text, `run ${m.command}`);
+  if (a.receivedAt !== undefined && a.receivedAt < m.askedAt) {
+    rec({ decision: 'predates_ask', state });
+    return NOTHING;
+  }
+  // Code-written: the engine's command never reaches the classify lane.
+  const action = `let their ${m.handle.engine} run the one step it paused on${m.description ? ` (${m.description})` : ''}`;
+  const consent = await resolveConsent(a.text, action);
   if (consent === 'unclear') {
     rec({ decision: 'unclear', state });
     return NOTHING;
+  }
+  if (consent === 'yes' && a.competing && (await resolveConsent(a.text, a.competing)) === 'yes') {
+    rec({ decision: 'ambiguous', state });
+    return { result: null, rerun: null, ambiguous: true };
   }
   const target = m.command.slice(0, 80);
   if (consent === 'no') {
