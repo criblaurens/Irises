@@ -222,6 +222,17 @@ export function nextStepClause(next?: string): string {
     : 'never a "want me to?" question';
 }
 
+/**
+ * Her offer as they saw it, for parkFollowUp: the whole delivered message on one line, reply tags
+ * stripped, bubbles joined with ' / '. Past 600 chars the head goes and the tail stays, because the
+ * offer rides in her last bubble (nextStepClause) and an act's yes authorizes these words. Pure;
+ * exported for the test.
+ */
+export function offerTextOf(deliveredText: string): string {
+  const t = deliveredText.split('\n---\n').map(b => stripReplyTag(b).trim()).filter(Boolean).join(' / ');
+  return t.length > 600 ? '…' + t.slice(-599) : t;
+}
+
 async function composeFollowUp(
   result: OpsResult,
   task: OpsTask,
@@ -230,6 +241,10 @@ async function composeFollowUp(
 ): Promise<{ text: string; toldSkippedStep: boolean; offeredFollowUp: boolean }> {
   const { chatId, agentHandle: handle } = task;
   const attempt = task.attempt ?? 1;
+  // A step this look skipped while it waited on their OK. Empty on every look that skipped nothing.
+  const skippedClause = skippedStepRelay(await skippedEngineStep(handle, task.id), moment, !!extras.giveUp);
+  // Never an offer beside a skipped step: one yes could then mean either.
+  const next = skippedClause ? undefined : extras.next;
 
   let instruction: string;
   if (moment === 'needs_info') {
@@ -259,7 +274,7 @@ async function composeFollowUp(
     // answers that, and holds the rest as one offer. "exactly as written" scopes fidelity to the
     // facts it relays — without the question here, a rich Ops pull reads as "relay all of this".
     // The NOTICED line is named as the material her view is made of.
-    instruction = `here's what you came back with. what they asked: "${task.request}". answer THAT, told to them and told the way you see it: the part that meets them leads, a couple of bubbles, not a report. the NOTICED line, when it's there, is what stood out while you were in there, and your view of this is made of it. anything true but beside their question doesn't go out as a fact of its own, and it can still shape what you think. no mention of what else you hold, and ${nextStepClause(extras.next)}. after the answer, one line that hands the thread back if the moment earns one, or none. whatever you do relay — every number, date, name, ~ and maybe — stays exactly as written:\n\n${result.summary}`;
+    instruction = `here's what you came back with. what they asked: "${task.request}". answer THAT, told to them and told the way you see it: the part that meets them leads, a couple of bubbles, not a report. the NOTICED line, when it's there, is what stood out while you were in there, and your view of this is made of it. anything true but beside their question doesn't go out as a fact of its own, and it can still shape what you think. no mention of what else you hold, and ${nextStepClause(next)}. after the answer, one line that hands the thread back if the moment earns one, or none. whatever you do relay — every number, date, name, ~ and maybe — stays exactly as written:\n\n${result.summary}`;
 
     // The read behind this look was shaky: Convo scored its comprehension of the ask below the
     // clean-delegation band when it launched. The answer is still real — but it answers Convo's
@@ -276,8 +291,7 @@ async function composeFollowUp(
   instruction += engineActionRelay(task, moment, result.summary ?? '');
   // And what they ADDED mid-run that the look never took in. Empty on almost every run.
   instruction += steerRelay(getUnappliedSteers(chatId, task.id), moment);
-  // A step this look skipped while it waited on their OK. Empty on every look that skipped nothing.
-  const skippedClause = skippedStepRelay(await skippedEngineStep(handle, task.id), moment, !!extras.giveUp);
+  // The skipped step's clause, computed above.
   instruction += skippedClause;
 
   // Continue straight from the exact holding line Irises last sent, so the late reply reads as one
@@ -345,7 +359,7 @@ async function composeFollowUp(
       trace: { chatId, handle, taskId: result.taskId, label: 'composer' },
       errorDetail: { moment },
       // With a next step on the table, the envelope reports whether her last bubble offered it.
-      ...(extras.next ? { followUp: true as const } : {}),
+      ...(next ? { followUp: true as const } : {}),
     });
     // Told them of a skipped step (best-effort): the composer's own text, written with the clause.
     return { text, toldSkippedStep: skippedClause !== '', offeredFollowUp };
@@ -683,9 +697,10 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
 
     const attempt = task.attempt ?? 1;
 
-    // The step that could come next (ops/followUp.ts), decided before the mouth so the compose inside
-    // it knows whether offering one is on the table at all. Parked only once the answer is out.
-    const next = await followUpCandidate(task, result, moment === 'answer').catch(() => undefined);
+    // The step that could come next (ops/followUp.ts). Taken inside the mouth right before the
+    // compose, under the chat lock, so no other look's engine ask arms in this chat between the check
+    // and her offer. Parked only once the answer is out.
+    let next: string | undefined;
     let offered = false;
     let deliveredText = '';
 
@@ -748,6 +763,7 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
         ]);
       }
 
+      next = await followUpCandidate(task, result, moment === 'answer').catch(() => undefined);
       const composeStart = Date.now();
       const composed = await composeFollowUp(result, task, moment, { missingFields: triage?.missingFields, giveUp, next });
       composeMs = Date.now() - composeStart;
@@ -783,9 +799,8 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     // whole message goes along as her offer (ops/followUp.ts): a last bubble alone can be a bare
     // question that never names the step.
     if (next) {
-      const offerText = deliveredText.split('\n---\n').map(b => stripReplyTag(b).trim()).filter(Boolean).join(' / ').slice(0, 600);
       const parked = offered && deliveredText.trim().endsWith('?')
-        ? await parkFollowUp(task, next, result.summary, offerText).catch(() => false)
+        ? await parkFollowUp(task, next, result.summary, offerTextOf(deliveredText)).catch(() => false)
         : false;
       record({ type: 'event', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, label: 'ops:follow-up', detail: { offered, parked } });
     }

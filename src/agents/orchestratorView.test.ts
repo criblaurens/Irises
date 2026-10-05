@@ -6,7 +6,7 @@ process.env.DATA_BACKEND = 'memory';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VIEW_EDGE, skippedStepRelay, nextStepClause } from './orchestrator.js';
+import { VIEW_EDGE, skippedStepRelay, nextStepClause, offerTextOf } from './orchestrator.js';
 import { loadContext } from './loadContext.js';
 
 test('the view edge states the move and the fact lock, with no sample phrasing', () => {
@@ -47,4 +47,13 @@ test('with no next step the answer keeps its standing rule; with one, offering i
 
 test('the composer persona names the one exception to its no-offer rule', () => {
   assert.match(loadContext('composer'), /the one exception is a next step your brief itself hands you as yours to offer/);
+});
+
+test('the parked offer text keeps her last bubble on a long answer, with reply tags stripped', () => {
+  assert.equal(offerTextOf('[[re:1]]the 9am is $412\n---\nhold it for you?'), 'the 9am is $412 / hold it for you?');
+  const long = offerTextOf(`[[re:1]]${'the 9am is $412 and the 11am is $380. '.repeat(30)}\n---\n[[re:2]]hold the 9am for you?`);
+  assert.equal(long.length, 600, 'capped at 600');
+  assert.ok(long.startsWith('…'), 'the head is what gets cut');
+  assert.ok(long.endsWith(' / hold the 9am for you?'), 'the offer they said yes to survives the cap');
+  assert.doesNotMatch(long, /\[\[re:/);
 });
