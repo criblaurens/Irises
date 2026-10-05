@@ -19,7 +19,7 @@ function statePath(): string {
 }
 
 /** An engine stub that records its onboarding sends. */
-function fakeEngine(name: 'hermes' | 'openclaw', opts: { fail?: boolean } = {}) {
+function fakeEngine(name: 'hermes' | 'openclaw', opts: { fail?: boolean; reply?: string } = {}) {
   const sends: Array<{ text: string; version: string }> = [];
   const engine: EngineBackend = {
     name,
@@ -33,7 +33,7 @@ function fakeEngine(name: 'hermes' | 'openclaw', opts: { fail?: boolean } = {}) 
     async sendOnboarding(text: string, version: string) {
       sends.push({ text, version });
       if (opts.fail) throw new Error('gateway not listening yet');
-      return 'OK';
+      return opts.reply ?? 'OK';
     },
   };
   return { engine, sends };
@@ -175,6 +175,28 @@ test('a failed send writes no flag, retries at 30s/2min/10min, then gives up unt
   assert.deepEqual(timers.map(t => t.ms), [30_000, 120_000, 600_000], 'ladder spent — no fourth rung armed');
   assert.ok(timers.every(t => t.unrefs === 1), 'every retry timer is unref\'d — onboarding never holds the process open');
   assert.equal(fs.existsSync(statePath()), false);
+});
+
+test('a run the gateway cut short is no onboarding: no flag, and the ladder sends it again', async () => {
+  const { engine, sends } = fakeEngine('hermes', { reply: 'Operation interrupted: waiting for model response (1.5s elapsed).' });
+  const { timers, setTimer } = fakeTimers();
+
+  await ensureEngineOnboarded({ getEngine: () => engine, now: () => 1, setTimer });
+
+  assert.equal(sends.length, 1);
+  assert.equal(loadOnboardingState().hermes, undefined);
+  assert.deepEqual(timers.map(t => t.ms), [30_000]);
+});
+
+test('a stored record of a cut-short run re-onboards on the next boot', async () => {
+  const { engine, sends } = fakeEngine('hermes');
+  const { setTimer } = fakeTimers();
+  saveOnboardingState({ hermes: { version: hermesOnboardingVersion(), sentAt: 5, reply: 'Operation interrupted: waiting for model response (1.5s elapsed).' } });
+
+  await ensureEngineOnboarded({ getEngine: () => engine, now: () => 9, setTimer });
+
+  assert.equal(sends.length, 1);
+  assert.equal(loadOnboardingState().hermes?.reply, 'OK');
 });
 
 test('ENGINE_ONBOARDING=off is a hard no-op — the operator curates the engine by hand', async () => {

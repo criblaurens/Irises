@@ -101,11 +101,19 @@ export function saveOnboardingState(s: OnboardingState): void {
  * One send. Success writes the flag and ends the chain; failure arms the next rung and returns. Never
  * rejects — this runs fire-and-forget from boot, so a snag here must not become an unhandled rejection.
  */
+/**
+ * hermes answers a run its gateway cut short (a restart landing mid-run, which a deploy's gateway
+ * bounce does right after Irises boots) with this line as a normal reply, so a 200 is not proof the
+ * doctrine landed. Such a reply is a failed send, and a stored one is no onboarding.
+ */
+const INTERRUPTED_REPLY = /^\s*operation interrupted\b/i;
+
 async function attempt(engine: EngineBackend, message: string, version: string, deps: OnboardingDeps, rung: number): Promise<void> {
   try {
     // The doctrine is a full agent run, so it queues behind the same semaphore as delegated work: a
     // boot-time send must never take a slot a waiting user turn needs.
     const reply = await withEngineSlot(() => engine.sendOnboarding!(message, version));
+    if (INTERRUPTED_REPLY.test(reply)) throw new Error(`the onboarding run was cut short: ${reply.slice(0, 120)}`);
     // Merged, not replaced: an operator who switched engines keeps the other engine's flag, so
     // switching back doesn't re-send a doctrine that engine already holds.
     saveOnboardingState({ ...loadOnboardingState(), [engine.name]: { version, sentAt: deps.now(), reply: reply.slice(0, 200) } });
@@ -137,7 +145,8 @@ export async function ensureEngineOnboarded(deps: Partial<OnboardingDeps> = {}):
   const doctrine = DOCTRINES[engine.name];
   if (!doctrine) return;
   const version = doctrine.version();
-  if (loadOnboardingState()[engine.name]?.version === version) return;
+  const saved = loadOnboardingState()[engine.name];
+  if (saved?.version === version && !INTERRUPTED_REPLY.test(saved.reply ?? '')) return;
   chainStarted = true;
   await attempt(engine, doctrine.message, version, d, 0);
 }
