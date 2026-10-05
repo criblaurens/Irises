@@ -1,13 +1,14 @@
 import { runTask, legBudgetFor } from './ops/client.js';
-import { withDeadline, DeadlineError } from './deadline.js';
+import { withDeadline, DeadlineError, type DeadlineExtender } from './deadline.js';
 import { setPreference } from '../db/repositories/memory.js';
 import { addShortTerm } from '../db/repositories/memoryShort.js';
 import { composeWithComposer } from './composerCore.js';
-import { markOpsDone, isOpsCancelled, noteOpsProgress, markOpsRetry, getOpsEtaStatus, getOpsEngineActions, getUnappliedSteers, normalizeRequest } from '../state/opsCoordination.js';
+import { markOpsDone, isOpsCancelled, noteOpsProgress, markOpsRetry, getOpsEtaStatus, getOpsEngineActions, getUnappliedSteers, normalizeRequest, extendOpsLeg, dropEngineAsks } from '../state/opsCoordination.js';
 import { detectCause, decide, splitMiss, retryTaskFor, steerReplayTaskFor, type TriageDecision } from './ops/triage.js';
 import { selectInterveningUserMessages } from './interveningMessages.js';
 import { redactInternalTools } from './guardrails.js';
-import { getEngineBackend } from './ops/engineBackend.js';
+import { getEngineBackend, engineApprovalRelayEnabled } from './ops/engineBackend.js';
+import { createEngineApprovalRelay, clearEngineApproval, skippedEngineStep } from './ops/engineApproval.js';
 import { voiceOutcome } from './fallfirm/client.js';
 import { type Outcome } from './fallfirm/floor.js';
 import { voiceInstant, type VoiceInstantOpts } from './fallfirm/voiceInstant.js';
@@ -163,6 +164,21 @@ export function steerRelay(unapplied: readonly string[], moment: ComposeMoment):
 }
 
 /**
+ * The clause for a step this look skipped while it waited on their OK (ops/engineApproval.ts): the
+ * engine asked, nobody answered in time, and the step did not run. A fact to relay, never her call:
+ * she already asked. Their yes still gets it done as a fresh run, which is why they must hear it was
+ * skipped. '' on every look that skipped nothing. The command and description are the engine's own
+ * text, so each is flattened to one line here: a newline in either could pass for a prompt heading.
+ * Pure; exported for the pin test.
+ */
+export function skippedStepRelay(step: { command: string; description: string } | null): string {
+  if (!step) return '';
+  const flat = (s: string) => s.replace(/\s*[\r\n]+\s*/g, ' / ');
+  const what = step.description ? `${flat(step.description)} (${flat(step.command)})` : flat(step.command);
+  return `\n\none step of this look waited on their OK and ran out of time, so it was skipped and did not run: ${what}. say so in one plain clause as part of what you send. their yes still gets that step done as a fresh run: say that once, and leave the choice with them.`;
+}
+
+/**
  * The answer moment's move, stated after the `<prompt>` block — the recency edge, where the
  * flash-tier voice model actually acts on a rule (a view offered mid-prompt as a permission did not
  * fire, Sept 2026). Principle only: a phrase named here gets reused verbatim, so the examples live in
@@ -224,6 +240,8 @@ async function composeFollowUp(
   instruction += engineActionRelay(task, moment, result.summary ?? '');
   // And what they ADDED mid-run that the look never took in. Empty on almost every run.
   instruction += steerRelay(getUnappliedSteers(chatId, task.id), moment);
+  // A step this look skipped while it waited on their OK. Empty on every look that skipped nothing.
+  instruction += skippedStepRelay(await skippedEngineStep(handle, task.id));
 
   // Continue straight from the exact holding line Irises last sent, so the late reply reads as one
   // seamless thread, not a fresh delivery. This is a continuity anchor only — never a fact source.
@@ -338,6 +356,23 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
   // mid-run update count can never exceed MAX_PROGRESS_PINGS regardless of how many legs fire.
   const pingBudget: PingBudget = { remaining: MAX_PROGRESS_PINGS };
 
+  // hermes's mid-run dangerous-command asks (ops/engineApproval.ts), relayed only with
+  // OPS_ENGINE_APPROVAL_RELAY on; off, no hook is passed and the ask is ignored as before. The ask is
+  // its own message, unpaced, and never dropped by the ping gate: the run is blocked on it.
+  // One relay for the whole task, built before the first leg, so a pre-approved command's one-shot
+  // answer holds across every leg.
+  const relay = engineApprovalRelayEnabled()
+    ? createEngineApprovalRelay(task, {
+      send: (chatId, text) => sendFollowUp(chatId, text, { paced: false }),
+      engineName: getEngineBackend()?.name ?? 'engine',
+    })
+    : null;
+  /** One leg's approval hooks: its own deadline and the task's in-flight horizon move out together. */
+  const approvalHooks = (ext: DeadlineExtender) => relay?.hooks(ms => {
+    ext.extend?.(ms);
+    extendOpsLeg(task.chatId, task.id, ms);
+  });
+
   // Per-leg ping machinery. Each leg (primary, then the cheap retry) gets its OWN gate, so
   // when the primary run is abandoned by a timeout its still-running loop's late onProgress calls hit
   // a stopped gate and are suppressed — they can never leak a ping for a discarded result. The gate
@@ -370,7 +405,9 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
           const voicedAt = Date.now();
           void sendFollowUp(task.chatId, text, {
             paced: false,
-            dropIf: () => gate.isStopped || isOpsCancelled(task.chatId, task.id),
+            // …and while an engine ask holds the run: a "still on it" under a question they have not
+            // answered yet reads as if nothing were waiting on them.
+            dropIf: () => gate.isStopped || isOpsCancelled(task.chatId, task.id) || !!relay?.waiting(),
             staleIfSpokenSince: voicedAt,
           }).catch(() => { /* progress is best-effort */ });
         },
@@ -417,9 +454,10 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     const legMs = legBudgetFor(task);
     // Keep the promise: on timeout we must WAIT for the aborted leg to actually settle before a
     // second leg starts, or the two legs bill tools + LLM steps concurrently.
-    const primaryRun = runTask(task, milestoneKey => { noteOpsProgress(task.chatId, task.id, milestoneKey); void primary.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, primaryAbort.signal), sink);
+    const primaryExt: DeadlineExtender = {};
+    const primaryRun = runTask(task, milestoneKey => { noteOpsProgress(task.chatId, task.id, milestoneKey); void primary.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, primaryAbort.signal), sink, undefined, approvalHooks(primaryExt));
     try {
-      result = await withDeadline(primaryRun, legMs, `ops task ${task.id}`);
+      result = await withDeadline(primaryRun, legMs, `ops task ${task.id}`, primaryExt);
     } catch (err) {
       // Only a deadline becomes a triageable synthetic result; a genuine throw goes to the outer catch.
       if (!(err instanceof DeadlineError)) throw err;
@@ -477,9 +515,10 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
       const replay = makePings(PROGRESS_QUIET_MS);
       pingStops.push(() => replay.gate.stop());
       const replayAbort = new AbortController();
-      const replayRun = runTask(replayTask, milestoneKey => { noteOpsProgress(replayTask.chatId, replayTask.id, milestoneKey); void replay.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, replayAbort.signal), undefined, undefined);
+      const replayExt: DeadlineExtender = {};
+      const replayRun = runTask(replayTask, milestoneKey => { noteOpsProgress(replayTask.chatId, replayTask.id, milestoneKey); void replay.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, replayAbort.signal), undefined, undefined, approvalHooks(replayExt));
       try {
-        result = await withDeadline(replayRun, legBudgetFor(replayTask), `ops steer-replay ${task.id}`);
+        result = await withDeadline(replayRun, legBudgetFor(replayTask), `ops steer-replay ${task.id}`, replayExt);
         ladderTask = replayTask;
       } catch (err) {
         // The replay died — keep the FIRST leg's answer. It is a real answer that merely misses the
@@ -543,9 +582,10 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
         const retryTask: OpsTask = retryTaskFor(ladderTask, triage);
         const t0 = Date.now();
         const retryAbort = new AbortController();
-        const retryRun = runTask(retryTask, milestoneKey => { noteOpsProgress(retryTask.chatId, retryTask.id, milestoneKey); void retry.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, retryAbort.signal), undefined, undefined);
+        const retryExt: DeadlineExtender = {};
+        const retryRun = runTask(retryTask, milestoneKey => { noteOpsProgress(retryTask.chatId, retryTask.id, milestoneKey); void retry.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, retryAbort.signal), undefined, undefined, approvalHooks(retryExt));
         try {
-          result = await withDeadline(retryRun, legBudgetFor(retryTask), `ops retry ${task.id}`);
+          result = await withDeadline(retryRun, legBudgetFor(retryTask), `ops retry ${task.id}`, retryExt);
         } catch (err) {
           // Retry died too (deadline or throw) — keep the FIRST result and its classification. The
           // transient ladder is spent here, so this is the incident, not the primary's own blip.
@@ -711,6 +751,12 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     // End-to-end latency for the whole delegation, on the single app clock (Convo stamping
     // task.createdAt → this exit): the one number the <60s target is measured against.
     record({ type: 'event', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, label: 'ops:duration', detail: { kind: task.kind, ms: Date.now() - task.createdAt } });
+    // None of this task's queued asks will be asked now, and a live one it left can never be
+    // answered. A skipped one stays for their late yes, unless they called the look off.
+    if (relay) {
+      dropEngineAsks(task.agentHandle, task.id);
+      void clearEngineApproval(task.agentHandle, task.id, isOpsCancelled(task.chatId, task.id)).catch(() => {});
+    }
     // Clear this task's in-flight marker LAST, so it outlives the result handoff above. Per-taskId
     // clear means a concurrent distinct task's marker survives. How it ended rides along for the
     // next turn's recently-ended list (a cancel was noted when it was stopped).

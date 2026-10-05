@@ -317,3 +317,14 @@ export function createEngineApprovalRelay(task: OpsTask, deps: {
     waiting: () => blocked.size > 0,
   };
 }
+
+/** The step this task's run left standing on their prefs, or null. Any ask of its own still standing
+ *  once the run is over is a skipped one (its 'expired' may land a moment after the run does). Read
+ *  by the answer's composer, so the delivery says so: a later yes re-runs it. */
+export async function skippedEngineStep(sender: string, taskId: string, now: number = Date.now()): Promise<{ command: string; description: string } | null> {
+  if (!engineApprovalRelayEnabled()) return null;
+  const m = await readMarker(sender);
+  return m && m.taskId === taskId && gatePendingEngineApproval(m, now) !== null
+    ? { command: m.command, description: m.description }
+    : null;
+}

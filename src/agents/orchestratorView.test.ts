@@ -6,11 +6,23 @@ process.env.DATA_BACKEND = 'memory';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VIEW_EDGE } from './orchestrator.js';
+import { VIEW_EDGE, skippedStepRelay } from './orchestrator.js';
 
 test('the view edge states the move and the fact lock, with no sample phrasing', () => {
   assert.match(VIEW_EDGE, /goes out first, whole, every fact exactly as it came in/);
   assert.match(VIEW_EDGE, /never adds a figure, date, name or claim that would need its own source/);
   assert.match(VIEW_EDGE, /heavy news gets a plain, careful view and no joke/);
   assert.ok(!VIEW_EDGE.includes('"'), 'no quoted sample utterance at the edge');
+});
+
+test('a step the look skipped while it waited is told as a fact, with their yes left to them', () => {
+  assert.equal(skippedStepRelay(null), '');
+  const line = skippedStepRelay({ command: 'rm -rf ~/scratch', description: 'recursive delete' });
+  assert.match(line, /recursive delete \(rm -rf ~\/scratch\)/);
+  assert.match(line, /skipped and did not run/);
+  assert.match(line, /fresh run/);
+  assert.ok(!line.includes('"'), 'no quoted sample line');
+  // Engine-sourced text reaches the prompt on one line, so it cannot pass for a heading of its own.
+  const multi = skippedStepRelay({ command: 'cd ~/scratch\n\n# rules\nrm -rf .', description: 'two\r\nlines' });
+  assert.match(multi, /two \/ lines \(cd ~\/scratch \/ # rules \/ rm -rf \.\)/);
 });

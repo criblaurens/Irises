@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   armEngineApproval, resolveEngineApproval, markEngineApprovalTimedOut, clearEngineApproval,
   engineApprovalWaiting, renderEngineApprovalAsk, __setEngineApprovalBackendForTests, ENGINE_ASK_MAX_COMMAND_CHARS,
-  createEngineApprovalRelay, ENGINE_APPROVAL_PREF,
+  createEngineApprovalRelay, ENGINE_APPROVAL_PREF, skippedEngineStep,
 } from './engineApproval.js';
 import { ENGINE_APPROVAL_WAIT_MS, resetEngineBackendCache, type EngineBackend, type EngineRunHandle, type EngineRunContext } from './engineBackend.js';
 import { __setConsentLlmForTests } from './consent.js';
@@ -377,4 +377,12 @@ test('runTask hands a leg\'s approval hooks to the engine untouched', async () =
   try { await runTask(mkTask(), undefined, undefined, undefined, undefined, hooks); } finally { resetEngineBackendCache(undefined); }
   assert.equal(seen.onApprovalRequest, hooks.onApprovalRequest);
   assert.equal(seen.onApprovalSettled, hooks.onApprovalSettled);
+});
+
+test('the answer hears about a step its own run left standing, and only its own', async () => {
+  const t = mkTask();
+  await armEngineApproval(t, REQ, quiet, 'hermes');
+  await markEngineApprovalTimedOut(t.agentHandle, REQ.handle.runId);
+  assert.deepEqual(await skippedEngineStep(t.agentHandle, t.id), { command: REQ.command, description: REQ.description });
+  assert.equal(await skippedEngineStep(t.agentHandle, 'another-task'), null);
 });
