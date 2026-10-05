@@ -179,6 +179,10 @@ export interface EngineApprovalOutcome {
   rerun: OpsTask | null;
   /** Their yes could equally answer the parked approval ask (`competing`): neither ask may take it. */
   ambiguous?: true;
+  /** A yes that did not count for this ask (it predates the ask, or came from another chat): a
+   *  non-success line so the reply cannot say the step was cleared. It settles nothing, so the
+   *  parked approval ask may still take the same reply. */
+  note?: ActionResult;
 }
 const NOTHING: EngineApprovalOutcome = { result: null, rerun: null };
 
@@ -190,9 +194,11 @@ const NOTHING: EngineApprovalOutcome = { result: null, rerun: null };
  *   • live, no → 'deny', and the run remembers the step was turned down;
  *   • skipped, yes → the step's own fresh run, nothing posted; skipped, no → let go, nothing posted;
  *   • unclear → nothing moves; past the shared clock → dropped.
- * Nothing moves either for a reply that predates the ask (`receivedAt`, the newest text's arrival),
- * or for a yes that also reads as a yes to the parked approval ask (`competing`, its request): that
- * comes back `ambiguous`, and the caller settles the parked ask with it no more than this one.
+ * Nothing moves either for a reply from another chat than the ask's, or one that predates the ask
+ * (`receivedAt`, the newest text's arrival); a yes among them comes back as a `note` that it did not
+ * count. Nor for a yes that also reads as a yes to the parked approval ask (`competing`, its
+ * request): that comes back `ambiguous`, and the caller settles the parked ask with it no more than
+ * this one.
  */
 export async function resolveEngineApproval(
   a: { sender: string; text: string; chatId: string; handle: string | undefined; receivedAt?: number; competing?: string },
@@ -211,12 +217,20 @@ export async function resolveEngineApproval(
     rec({ decision: 'lapsed' });
     return NOTHING;
   }
-  if (a.receivedAt !== undefined && a.receivedAt < m.askedAt) {
-    rec({ decision: 'predates_ask', state });
-    return NOTHING;
-  }
   // Code-written: the engine's command never reaches the classify lane.
   const action = `let their ${m.handle.engine} run the one step it paused on${m.description ? ` (${m.description})` : ''}`;
+  // The marker is keyed by sender, so a reply from a chat the ask was never shown in, or one sent
+  // before it reached them, answers nothing. A yes among them gets a line that it did not count.
+  const elsewhere = a.chatId !== m.chatId ? 'it was sent in another chat'
+    : a.receivedAt !== undefined && a.receivedAt < m.askedAt ? 'it came before the ask reached them'
+    : null;
+  if (elsewhere) {
+    const yes = (await resolveConsent(a.text, action)) === 'yes';
+    rec({ decision: a.chatId !== m.chatId ? 'other_chat' : 'predates_ask', state, yes });
+    return yes
+      ? { ...NOTHING, note: { tool: 'engine_approval', status: 'unavailable', target: m.command.slice(0, 80), detail: `that yes did not clear the step (${elsewhere}); the step is still waiting on a yes to the ask itself` } }
+      : NOTHING;
+  }
   const consent = await resolveConsent(a.text, action);
   if (consent === 'unclear') {
     rec({ decision: 'unclear', state });

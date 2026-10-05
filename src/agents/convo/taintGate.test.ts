@@ -239,6 +239,69 @@ test('her line that the step is cleared stands on the engine answer: no correcti
   }
 });
 
+test('a yes sent before the engine asked cannot back her line that the step is cleared', async () => {
+  const calls = engineCalls();
+  try {
+    const a = args('go');
+    await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');
+    const early = { ...a, chatContext: { ...a.chatContext, arrivals: [{ receivedAt: Date.now() - 60_000, sendsAfterArrival: 0 }] } };
+    const out = await processConvoResult({ ...early, res: makeResult(['all set']), turn: reasker(['all set']).turn });
+    assert.deepEqual(calls, []);
+    assert.notEqual(out.text, 'all set', 'the claim does not ship over a step still waiting');
+  } finally {
+    __setEngineApprovalBackendForTests(undefined);
+  }
+});
+
+test('a yes sent before the engine asked still answers a parked act', async () => {
+  const calls = engineCalls();
+  try {
+    const a = args('email my landlord the lease');
+    await processConvoResult({ ...a, res: makeResult(['on it'], [delegate('email my landlord the lease')]), turn: reasker(['want me to email your landlord the lease?']).turn });
+    await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');
+    const early = { ...a, chatContext: { ...a.chatContext, arrivals: [{ receivedAt: Date.now() - 60_000, sendsAfterArrival: 0 }] } };
+    const out = await processConvoResult({ ...early, textToSend: 'yes', res: makeResult(['on it']), turn: reasker([]).turn });
+    assert.deepEqual(calls, []);
+    assert.ok(out.delegatedTask, 'the parked act took the yes');
+    assert.equal(out.text, 'on it', 'and no note about the engine step buries her line');
+  } finally {
+    __setEngineApprovalBackendForTests(undefined);
+  }
+});
+
+test('a yes sent in a group, where the ask was never shown, leaves her group reply alone', async () => {
+  const calls = engineCalls();
+  try {
+    const a = args('yes');
+    await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');
+    const group = { ...a, chatId: randomUUID(), handle: `group:${randomUUID()}`, chatContext: { ...a.chatContext, isGroupChat: true } };
+    const out = await processConvoResult({ ...group, res: makeResult(['haha same']), turn: reasker([]).turn });
+    assert.deepEqual(calls, []);
+    assert.equal(out.text, 'haha same');
+  } finally {
+    __setEngineApprovalBackendForTests(undefined);
+  }
+});
+
+test('with the approval gate off, a live parked ask still makes a bare yes ambiguous', async () => {
+  const calls = engineCalls();
+  try {
+    const a = args('yes');
+    await setPreference(a.handle, 'pending_approval', { taskId: 'parked-1', request: 'email my landlord the lease', askedAt: Date.now() });
+    await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');
+    process.env.OPS_APPROVAL_GATE = 'off';
+    try {
+      await processConvoResult({ ...a, res: makeResult(['which one?']), turn: reasker([]).turn });
+    } finally {
+      delete process.env.OPS_APPROVAL_GATE;
+    }
+    assert.deepEqual(calls, [], 'the dossier showed both asks, so the yes runs neither');
+    assert.equal(receipt('ops:engine_approval')?.decision, 'ambiguous');
+  } finally {
+    __setEngineApprovalBackendForTests(undefined);
+  }
+});
+
 test('an engine ask keeps a reply from streaming, even with the approval gate off', async () => {
   const a = args('go');
   await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');

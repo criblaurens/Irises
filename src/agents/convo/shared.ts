@@ -4079,8 +4079,9 @@ export async function processConvoResult(args: {
   // Fenced off the recall second pass (`archivePass`) and the outcome pass: each re-enters this
   // function with the same user text, and the ask has already been resolved by the first one.
   //
-  // The flag read comes FIRST: with OPS_APPROVAL_GATE off nothing here runs at all — no prefs read,
-  // no classify call, no promotion — and a parked row from before the flip is left exactly as it is.
+  // The flag read comes FIRST: with OPS_APPROVAL_GATE off the parked row is never resolved — no
+  // classify call for it, no promotion — and a row from before the flip is left exactly as it is
+  // (the engine's ask still reads it, only to know whether a bare yes could mean it).
   let settledTask: OpsTask | null = null;
   let settledReconfirm: { request: string; engineActions?: string[] } | null = null;
   // A no that just dropped the parked action. It is the turn's own cancel, done before the model's
@@ -4092,22 +4093,27 @@ export async function processConvoResult(args: {
   // blocked on it, and a reply that settles it never also settles a parked look. A late yes comes back
   // as that step's own fresh run, through the same slot an approved park uses. Its own flag
   // (OPS_ENGINE_APPROVAL_RELAY) is read inside, independent of OPS_APPROVAL_GATE.
-  // A reply that predates the ask answers nothing (`receivedAt`, the newest text's arrival). A yes
-  // that could equally mean a standing parked ask settles neither (`ambiguous`): the parked ask is
-  // read by the same gate the dossier shows its which-one line by, so the two always agree.
+  // A reply from another chat, or one that predates the ask (`receivedAt`, the newest text's
+  // arrival), answers nothing. A yes that could equally mean a standing parked ask settles neither
+  // (`ambiguous`): the parked ask is read by the same gate the dossier shows its which-one line by,
+  // with no flag in front of it, so the two always agree.
   let settledEngine: ActionResult | null = null;
   let engineAmbiguous = false;
+  // A yes that did not count for the engine's ask. Settles nothing, so the parked ask below may
+  // still take the reply.
+  let engineNote: ActionResult | null = null;
   if (chatContext?.senderHandle && !args.archivePass && !args.outcomePass) {
     const sender = chatContext.senderHandle;
-    const pa = opsApprovalGateEnabled()
-      ? await getPreference<PendingApprovalPref>(sender, 'pending_approval').catch(() => undefined)
-      : undefined;
+    const pa = await getPreference<PendingApprovalPref>(sender, 'pending_approval').catch(() => undefined);
     const competing = pa && gatePendingApproval(pa, Date.now()).keep ? pa.request : undefined;
     const receivedAt = chatContext.arrivals?.length ? Math.max(...chatContext.arrivals.map(x => x.receivedAt)) : undefined;
     const engineAsk = await resolveEngineApproval({ sender, text: textToSend ?? '', chatId, handle, receivedAt, competing });
     settledEngine = engineAsk.result;
     settledTask = engineAsk.rerun;
     engineAmbiguous = !!engineAsk.ambiguous;
+    // Only in a 1:1, the one place the dossier shows the ask: a room's reply never saw it, so there
+    // is no claim to correct, and the note would carry their step into the room.
+    if (!chatContext.isGroupChat) engineNote = engineAsk.note ?? null;
   }
   if (!settledEngine && !engineAmbiguous && opsApprovalGateEnabled() && chatContext?.senderHandle && !args.archivePass && !args.outcomePass) {
     const settled = await resolvePendingApproval({
@@ -4123,6 +4129,8 @@ export async function processConvoResult(args: {
       settledDeclineRef = { tool: 'cancel_research', id: settled.declined.id, label: settled.declined.request, parked: true };
     }
   }
+  // A yes the parked ask took was its answer: the engine's step was never what it meant.
+  if (settledTask || settledReconfirm) engineNote = null;
 
   // The honesty backstop, BEFORE anything is dispatched or persisted: a reply that promised work
   // while calling no tool with nothing running for them gets one corrective re-ask, and whatever
@@ -4141,7 +4149,7 @@ export async function processConvoResult(args: {
   // What an earlier pass already did rides in as `carried`, and is what backs a claim made here. A
   // no that just dropped the parked action backs one the same way: "cancelled it" is then true of a
   // change this turn made, with no call of her own behind it.
-  const settledResults = [settledEngine, settledDecline].filter((r): r is ActionResult => r !== null);
+  const settledResults = [settledEngine, engineNote, settledDecline].filter((r): r is ActionResult => r !== null);
   const backing = settledResults.length
     ? { ...(args.carried ?? newTurnEffects()), results: [...(args.carried?.results ?? []), ...settledResults] }
     : args.carried;
@@ -4273,8 +4281,10 @@ export async function processConvoResult(args: {
     effects.results.push(settledDecline);
     effects.cancelled.push(settledDeclineRef);
   }
-  // The engine ask's answer is this turn's own result, recorded once, on the first pass.
+  // The engine ask's answer is this turn's own result, recorded once, on the first pass; so is a yes
+  // that did not count for it.
   if (settledEngine) effects.results.push(settledEngine);
+  if (engineNote) effects.results.push(engineNote);
   // Which way the routing floor went, set on every turn it was EVALUATED on and left undefined on
   // the turns that never reached it (a delegation already built, the recall second pass, no memory
   // identity). Rides the turn receipt so a month of turns can be bucketed by it.

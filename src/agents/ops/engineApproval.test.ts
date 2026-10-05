@@ -17,6 +17,7 @@ import { emptyMedia } from '../../webhook/types.js';
 import type { OpsTask } from '../types.js';
 import { getPreference } from '../../db/repositories/memory.js';
 import { getTraces, clearTraces } from '../../diagnostics/trace.js';
+import { actionSucceeded } from '../convo/actionResults.js';
 import { runTask } from './client.js';
 
 const unclearLane = async () => ({ text: 'UNCLEAR', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' });
@@ -229,10 +230,40 @@ test('a reply sent before the ask went out answers nothing', async () => {
   const calls: Calls = [];
   await armEngineApproval(t, REQ, quiet, 'hermes');
   const out = await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'yes', { receivedAt: Date.now() - 60_000 })));
-  assert.deepEqual(out, { result: null, rerun: null });
+  assert.equal(out.result, null);
+  assert.equal(out.rerun, null);
   assert.deepEqual(calls, []);
   assert.equal(await engineApprovalWaiting(t.agentHandle), true);
   assert.equal(decisions(t.id).at(-1), 'predates_ask');
+});
+
+test('a yes sent in another chat answers nothing: the ask was never shown there', async () => {
+  const t = mkTask();
+  const calls: Calls = [];
+  await armEngineApproval(t, REQ, quiet, 'hermes');
+  const out = await withEngine('resolved', calls, () => resolveEngineApproval({ ...reply(t, 'yes'), chatId: 'a-group-chat' }));
+  assert.equal(out.result, null);
+  assert.equal(out.rerun, null);
+  assert.deepEqual(calls, []);
+  assert.equal(await engineApprovalWaiting(t.agentHandle), true, 'still waiting for a yes in its own chat');
+  assert.equal(decisions(t.id).at(-1), 'other_chat');
+});
+
+test('a yes that did not count comes back as a note no claim can stand on, and settles nothing', async () => {
+  const t = mkTask();
+  const calls: Calls = [];
+  await armEngineApproval(t, REQ, quiet, 'hermes');
+  const early = await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'yes', { receivedAt: Date.now() - 60_000 })));
+  assert.equal(early.note?.status, 'unavailable', 'voiced, never an outcome-pass status');
+  assert.equal(actionSucceeded(early.note!), false);
+  assert.match(early.note!.detail, /came before the ask reached them/);
+  assert.match(early.note!.detail, /still waiting on a yes to the ask itself/);
+  const elsewhere = await withEngine('resolved', calls, () => resolveEngineApproval({ ...reply(t, 'yes'), chatId: 'a-group-chat' }));
+  assert.match(elsewhere.note!.detail, /sent in another chat/);
+  const chatter = await withEngine('resolved', calls, () => resolveEngineApproval(reply(t, 'what does that even do', { receivedAt: Date.now() - 60_000 })));
+  assert.equal(chatter.note, undefined, 'only a yes has anything to correct');
+  assert.deepEqual(calls, []);
+  assert.equal(await engineApprovalWaiting(t.agentHandle), true);
 });
 
 test('a yes that also answers a parked approval ask settles neither and posts nothing', async () => {
