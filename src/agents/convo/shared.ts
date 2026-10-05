@@ -2888,6 +2888,9 @@ interface PendingApprovalPref {
   effect?: 'read' | 'act';
   /** Why it waited (agents/ops/riskGate.ts). For the receipts. */
   reasons?: GateReason[];
+  /** An offer she made after a look (agents/ops/followUp.ts) rather than an ask the gate parked. Only
+   *  the prompt section's wording reads it; the yes, no, expiry and re-confirm are the same. */
+  origin?: 'follow_up';
   /** When the ask ran out of clock. The row is already settled 'expired' by then; the marker lives
    *  one more TTL so a yes that arrives a couple of turns late still gets its one re-ask rather than
    *  landing on nothing (user decision 2026-09-04). */
@@ -3039,6 +3042,7 @@ async function resolvePendingApproval(a: {
       taskId: fresh.id, request: fresh.request, kind: fresh.kind, askedAt: now, reconfirm: true, effect: fresh.effect,
       ...(pa.reasons ? { reasons: pa.reasons } : {}),
       ...(fresh.engineActions?.length ? { engineActions: fresh.engineActions } : {}),
+      ...(pa.origin ? { origin: pa.origin } : {}),
     }).catch(err => console.error('[convo] failed to persist pending_approval', err));
     rec({ decision: 'reconfirm', taskId: fresh.id, of: pa.taskId, ageMs: latencyMs });
     return {

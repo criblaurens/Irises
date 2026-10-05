@@ -957,3 +957,14 @@ test('the engine section asks which one when a parked approval ask is also live,
   await setPreference(parkedOnly, 'pending_approval', parked(Date.now() - 60_000));
   assert.doesNotMatch((await buildContextBlockWithHot(parkedOnly, 'yes')).block, ambiguity);
 });
+
+test('renderPendingApproval words an offer she made as her offer, and it has still not started', () => {
+  const now = Date.UTC(2026, 9, 4, 12, 0, 0);
+  const pa = { taskId: 't-2', request: 'hold the 9am fare for them', kind: 'general', askedAt: now - 60_000 };
+  const offer = renderPendingApproval({ ...pa, origin: 'follow_up' }, now);
+  assert.match(offer, /^## You offered them a next step/);
+  assert.match(offer, /You offered to also do: \[A[0-9a-z]+\] "hold the 9am fare for them"/);
+  assert.match(offer, /has NOT started/);
+  assert.match(offer, /the offer stays open until they settle it\.$/);
+  assert.ok(offer.length < renderPendingApproval(pa, now).length, 'never wider than the act wording the budget fixture carries');
+});

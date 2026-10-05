@@ -131,7 +131,7 @@ export function renderPendingClarification(pc: PendingClarificationCtx): string 
  *  for either has moved on, and two numbers here would eventually disagree about that. */
 export const PENDING_ASK_TTL_MS = PENDING_CLARIFICATION_TTL_MS;
 
-export interface PendingApprovalCtx { taskId?: string; request?: string; kind?: string; askedAt?: number }
+export interface PendingApprovalCtx { taskId?: string; request?: string; kind?: string; askedAt?: number; origin?: 'follow_up' }
 
 /**
  * Is the approval ask she just made still live? PURE — `now` is injected.
@@ -160,7 +160,13 @@ export function renderPendingApproval(pa: PendingApprovalCtx, nowMs: number): st
   // The id the parked row is addressed by (cancel_research takes it), the way a running lookup and a
   // reminder are shown with theirs.
   const ref = pa.taskId ? `[${shortApprovalId(pa.taskId)}] ` : '';
-  return `## You asked them to approve an action (their next reply is probably the answer)\nYou asked whether to go ahead with: ${ref}"${pa.request}"${when}. It has NOT started, and will not until they say yes — never speak about it as if it were running.\nIf they say yes, it starts as this turn ends: one short line that you are doing it. If they say no, let it go in one line. If they reply about something else, answer that normally — the ask stays open until they settle it.`;
+  // An offer she made after a look (agents/ops/followUp.ts) parks the way an approval ask does, and
+  // reads as what it was. The act wording is byte for byte what it always was.
+  const offer = pa.origin === 'follow_up';
+  const opening = offer
+    ? '## You offered them a next step (their next reply is probably the answer)\nYou offered to also do: '
+    : '## You asked them to approve an action (their next reply is probably the answer)\nYou asked whether to go ahead with: ';
+  return `${opening}${ref}"${pa.request}"${when}. It has NOT started, and will not until they say yes — never speak about it as if it were running.\nIf they say yes, it starts as this turn ends: one short line that you are doing it. If they say no, let it go in one line. If they reply about something else, answer that normally — the ${offer ? 'offer' : 'ask'} stays open until they settle it.`;
 }
 
 /** Their engine's ask (agents/ops/engineApproval.ts) as it sits on their prefs: the fields this
