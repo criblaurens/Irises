@@ -164,9 +164,9 @@ export function steerRelay(unapplied: readonly string[], moment: ComposeMoment):
 }
 
 /** Does the look end by asking them to narrow it: a needs_info question, or a miss's steering
- *  question (a give-up miss asks none)? The two-strike marker, the skipped-step clause and the
- *  standing step all read this one answer. */
-function asksToNarrow(moment: ComposeMoment | undefined, giveUp: boolean): boolean {
+ *  question (a give-up miss asks none)? The two-strike marker and the skipped-step clause read this
+ *  one answer, and through the clause so does the standing step (settleLookEngineAsk). */
+function asksToNarrow(moment: ComposeMoment, giveUp: boolean): boolean {
   return moment === 'needs_info' || (moment === 'miss' && !giveUp);
 }
 
@@ -187,15 +187,15 @@ export function skippedStepRelay(step: { command: string; description: string } 
 }
 
 /**
- * What the end of a look does with an engine ask of its own still standing on their prefs. A live
- * one is a skipped step (its 'expired' may land a moment after the run does), the same reading the
- * answer's composer took (skippedEngineStep), so it stays, flagged, for the late yes the answer
- * promised. Nothing promised it when they called the look off, or when the look ended by asking
- * them to narrow (asksToNarrow), which names no step (skippedStepRelay): then it goes, live or
- * skipped, so their answer to her question can never run it. Exported for the test.
+ * What the end of a look does with an engine ask of its own still standing on their prefs. ONE
+ * rule: it is kept only when the message they read told them of it (`told`: the composer's own
+ * text went out carrying skippedStepRelay's clause), and then it stays, flagged skipped, for the
+ * late yes that message promised. Every other ending clears it, live or skipped: a look they called
+ * off, one that asked them to narrow, a fallback voicing, a run that threw. A step they were never
+ * told of can never be run by their next reply. Exported for the test.
  */
-export function settleLookEngineAsk(task: OpsTask, end: ComposeMoment | undefined, giveUp = false): Promise<void> {
-  return isOpsCancelled(task.chatId, task.id) || asksToNarrow(end, giveUp)
+export function settleLookEngineAsk(task: OpsTask, told: boolean): Promise<void> {
+  return isOpsCancelled(task.chatId, task.id) || !told
     ? clearEngineApproval(task.agentHandle, task.id, true)
     : markEngineApprovalTimedOut(task.agentHandle, { taskId: task.id });
 }
@@ -213,7 +213,7 @@ async function composeFollowUp(
   task: OpsTask,
   moment: ComposeMoment,
   extras: { missingFields?: string[]; giveUp?: boolean } = {},
-): Promise<string> {
+): Promise<{ text: string; toldSkippedStep: boolean }> {
   const { chatId, agentHandle: handle } = task;
   const attempt = task.attempt ?? 1;
 
@@ -263,7 +263,8 @@ async function composeFollowUp(
   // And what they ADDED mid-run that the look never took in. Empty on almost every run.
   instruction += steerRelay(getUnappliedSteers(chatId, task.id), moment);
   // A step this look skipped while it waited on their OK. Empty on every look that skipped nothing.
-  instruction += skippedStepRelay(await skippedEngineStep(handle, task.id), moment, !!extras.giveUp);
+  const skippedClause = skippedStepRelay(await skippedEngineStep(handle, task.id), moment, !!extras.giveUp);
+  instruction += skippedClause;
 
   // Continue straight from the exact holding line Irises last sent, so the late reply reads as one
   // seamless thread, not a fresh delivery. This is a continuity anchor only — never a fact source.
@@ -295,7 +296,7 @@ async function composeFollowUp(
     // last, two-attempt ladder, echo tripwire) lives in composerCore.ts — shared with the proactive
     // path. Everything above is the framing this moment needs; the callback below adds the two
     // clauses that can only be written once the history is in hand.
-    return await composeWithComposer({
+    const text = await composeWithComposer({
       chatId,
       handle,
       buildInstruction: history => {
@@ -330,6 +331,8 @@ async function composeFollowUp(
       trace: { chatId, handle, taskId: result.taskId, label: 'composer' },
       errorDetail: { moment },
     });
+    // Told them of a skipped step only when the composer's own text went out with the clause in it.
+    return { text, toldSkippedStep: skippedClause !== '' };
   } catch (err) {
     console.error('[orchestrator] composeFollowUp failed — handing to Fallfirm', err);
     // The composer's own attempts failed. Fallfirm is the second-chance voicer: it re-voices the
@@ -350,7 +353,7 @@ async function composeFollowUp(
     } else {
       outcome = { kind: 'failed', summary: 'you have their answer but sending it glitched on your end', nextStep: "tell them to ping again and you'll fire it right over" };
     }
-    return voiceOutcome(outcome, chatId, handle);
+    return { text: await voiceOutcome(outcome, chatId, handle), toldSkippedStep: false };
   }
 }
 
@@ -451,8 +454,7 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
   const stopAllPings = () => { for (const s of pingStops) s(); };
 
   let finalSent = false; // the double-send latch: never voice a failure after an answer already shipped
-  let endMoment: ComposeMoment | undefined; // the moment the look ended on, once it is settled
-  let endGiveUp = false;
+  let toldSkippedStep = false; // the composer's answer told them of a skipped step (settleLookEngineAsk)
   try {
     record({
       type: 'delegation', chatId: task.chatId, handle: task.agentHandle, taskId: task.id,
@@ -648,8 +650,6 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     // attempt 1 (triage downgrades it to give_up on ≥2), so this only fires on a first look.
     if (triage?.action === 'ask_user' && moment === 'miss' && (task.attempt ?? 1) < 2) moment = 'needs_info';
     const giveUp = triage?.action === 'give_up';
-    endMoment = moment;
-    endGiveUp = giveUp;
 
     stopAllPings(); // final result in hand — no more "still on it" before the (slower) compose+send
 
@@ -725,7 +725,8 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
       const composeStart = Date.now();
       const composed = await composeFollowUp(result, task, moment, { missingFields: triage?.missingFields, giveUp });
       composeMs = Date.now() - composeStart;
-      return composed;
+      toldSkippedStep = composed.toldSkippedStep;
+      return composed.text;
     }, {
       // Anchor the out-of-band answer to the user's original question: the FIRST bubble natively
       // quotes the message that asked (replyToMessageId was set to that, never a trailing "thanks"),
@@ -779,11 +780,11 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     // End-to-end latency for the whole delegation, on the single app clock (Convo stamping
     // task.createdAt → this exit): the one number the <60s target is measured against.
     record({ type: 'event', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, label: 'ops:duration', detail: { kind: task.kind, ms: Date.now() - task.createdAt } });
-    // None of this task's queued asks will be asked now, and one it left standing is settled by the
-    // way the look ended (settleLookEngineAsk).
+    // None of this task's queued asks will be asked now, and one it left standing is kept only when
+    // the answer that went out told them of it (settleLookEngineAsk).
     if (relay) {
       dropEngineAsks(task.agentHandle, task.id);
-      void settleLookEngineAsk(task, endMoment, endGiveUp)
+      void settleLookEngineAsk(task, toldSkippedStep && finalSent)
         .catch(err => console.warn('[orchestrator] failed to settle the engine ask of a finished look', err));
     }
     // Clear this task's in-flight marker LAST, so it outlives the result handoff above. Per-taskId

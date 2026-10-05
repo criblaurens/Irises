@@ -508,9 +508,9 @@ test('an answer that lands after a newer ask went out never erases the newer ask
   assert.equal(m?.taskId, t2.id, 'the newer ask still stands');
 });
 
-test('a run that ends with its ask still live leaves it as a skipped step, for the yes its answer promises', async () => {
+/** A look whose engine pauses on REQ mid-run and then answers; `send` is the mouth it delivers through. */
+async function lookThatAsked(t: OpsTask, send: (chatId: string, content: string | (() => Promise<string | null>)) => Promise<'sent' | 'dropped'>): Promise<void> {
   __resetOpsCoordination();
-  const t = mkTask();
   resetEngineBackendCache({
     name: 'hermes',
     runTask: async (_p: string, _t: OpsTask, ctx: EngineRunContext) => { ctx.onApprovalRequest?.(REQ); await flush(); return 'ANSWER: done\nFLAGS: none'; },
@@ -518,35 +518,40 @@ test('a run that ends with its ask still live leaves it as a skipped step, for t
     async cancelReminder() { return false; }, async remember() {}, async probe() { return { ok: true }; }, async channelSend() { return {}; },
   });
   try {
-    await runOpsAndFollowUp(t, async () => 'sent' as const);
+    await runOpsAndFollowUp(t, send);
   } finally {
     resetEngineBackendCache(undefined);
   }
   await flush();
-  const m = await getPreference<{ taskId: string; timedOut?: boolean }>(t.agentHandle, ENGINE_APPROVAL_PREF);
-  assert.equal(m?.taskId, t.id, 'still standing after the run');
-  assert.equal(m?.timedOut, true, 'as a skipped step');
+}
+
+test('a look whose message never named its step clears it: the fallback voicing, or a run that threw', async () => {
+  // No LLM lane in tests, so the composer fails and Fallfirm's fallback is what goes out.
+  const fallback = mkTask();
+  await lookThatAsked(fallback, async (_c, content) => { if (typeof content === 'function') await content(); return 'sent'; });
+  assert.equal(await getPreference(fallback.agentHandle, ENGINE_APPROVAL_PREF), null, 'the fallback never named the step');
+  // The ask goes out; the follow-up's delivery throws, so only the snag line is tried.
+  const threw = mkTask();
+  await lookThatAsked(threw, async (_c, content) => { if (typeof content === 'function') throw new Error('mouth down'); return 'sent'; });
+  assert.equal(await getPreference(threw.agentHandle, ENGINE_APPROVAL_PREF), null, 'the snag line never named it');
 });
 
-test('a look that ends by asking them to narrow leaves no step their answer could run', async () => {
+test('a finished look keeps its step only when the message they read named it', async () => {
   const live = mkTask();
   await armEngineApproval(live, REQ, quiet, 'hermes');
-  await settleLookEngineAsk(live, 'needs_info');
-  assert.equal(await getPreference(live.agentHandle, ENGINE_APPROVAL_PREF), null, 'a live step goes');
+  await settleLookEngineAsk(live, false);
+  assert.equal(await getPreference(live.agentHandle, ENGINE_APPROVAL_PREF), null, 'a live step they were never told of goes');
   const skipped = mkTask();
   await armEngineApproval(skipped, REQ, quiet, 'hermes');
   await markEngineApprovalTimedOut(skipped.agentHandle, REQ.handle.runId);
-  await settleLookEngineAsk(skipped, 'needs_info');
-  assert.equal(await getPreference(skipped.agentHandle, ENGINE_APPROVAL_PREF), null, 'and so does a skipped one: nothing promised it');
-  const steered = mkTask();
-  await armEngineApproval(steered, REQ, quiet, 'hermes');
-  await settleLookEngineAsk(steered, 'miss');
-  assert.equal(await getPreference(steered.agentHandle, ENGINE_APPROVAL_PREF), null, 'a miss that asks them to narrow is a question too');
-  const gaveUp = mkTask();
-  await armEngineApproval(gaveUp, REQ, quiet, 'hermes');
-  await settleLookEngineAsk(gaveUp, 'miss', true);
-  const kept = await getPreference<{ taskId: string; timedOut?: boolean }>(gaveUp.agentHandle, ENGINE_APPROVAL_PREF);
-  assert.equal(kept?.timedOut, true, 'a give-up asks nothing, so its step stays for the late yes it tells them of');
+  await settleLookEngineAsk(skipped, false);
+  assert.equal(await getPreference(skipped.agentHandle, ENGINE_APPROVAL_PREF), null, 'and so does a skipped one');
+  const told = mkTask();
+  await armEngineApproval(told, REQ, quiet, 'hermes');
+  await settleLookEngineAsk(told, true);
+  const kept = await getPreference<{ taskId: string; timedOut?: boolean }>(told.agentHandle, ENGINE_APPROVAL_PREF);
+  assert.equal(kept?.taskId, told.id);
+  assert.equal(kept?.timedOut, true, 'an answer that named it keeps it for the late yes it promised');
 });
 
 test('a relay step that fails says so in the log', async () => {
