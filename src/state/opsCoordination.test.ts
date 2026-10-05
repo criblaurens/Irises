@@ -9,6 +9,7 @@ import {
   opsStaleMs, OPS_STALE_SLACK_MS,
   noteOpsEngineRun, getOpsEngineRun, requestOpsSteer, takePendingSteers,
   beginOpsEngineLeg, endOpsEngineLeg, noteOpsSteerUnreachable, extendOpsLeg,
+  enqueueEngineAsk, settleEngineAsk, dropEngineAsks, noteEngineAskDeclined, engineAskDeclined,
 } from './opsCoordination.js';
 import { BROWSER_LEG_BUDGET_MS, ENGINE_APPROVAL_WAIT_MS } from '../agents/ops/engineBackend.js';
 
@@ -464,4 +465,37 @@ test('an engine ask stretches the in-flight horizon by its wait, and a new leg s
   assert.equal(isDuplicateDelegation('c-grace', 'general', 'clear the scratch folder', past), 'in_flight');
   markOpsRetry('c-grace', 't-grace');
   assert.equal(getActiveOps('c-grace', Date.now() + opsStaleMs() + 1_000).length, 0, 'the retry leg carries no grace');
+});
+
+const queuedAsk = (armed: string[], taskId: string, runId: string) => ({ taskId, runId, arm: () => { armed.push(runId); } });
+
+test('one engine ask per person: a second one waits, and is asked when the first settles', () => {
+  __resetOpsCoordination();
+  const armed: string[] = [];
+  assert.equal(enqueueEngineAsk('+1', queuedAsk(armed, 't1', 'r1')), 'armed');
+  assert.equal(enqueueEngineAsk('+1', queuedAsk(armed, 't2', 'r2')), 'queued');
+  assert.equal(enqueueEngineAsk('+2', queuedAsk(armed, 't3', 'r3')), 'armed', 'another person is not in this line');
+  settleEngineAsk('+1', 'r1');
+  assert.deepEqual(armed, ['r1', 'r3', 'r2']);
+});
+
+test('a queued ask whose wait ended, or whose task ended, is never asked', () => {
+  __resetOpsCoordination();
+  const armed: string[] = [];
+  enqueueEngineAsk('+1', queuedAsk(armed, 't1', 'r1'));
+  enqueueEngineAsk('+1', queuedAsk(armed, 't2', 'r2'));
+  enqueueEngineAsk('+1', queuedAsk(armed, 't3', 'r3'));
+  settleEngineAsk('+1', 'r2'); // its window closed while it waited in line
+  dropEngineAsks('+1', 't1');  // the live one's task ended
+  assert.deepEqual(armed, ['r1', 'r3']);
+});
+
+test('a declined engine ask is remembered on its task until the task ends', () => {
+  __resetOpsCoordination();
+  markOpsStart('c-dec', 't-dec', { kind: 'general', request: 'tidy my downloads' });
+  assert.equal(engineAskDeclined('c-dec', 't-dec'), false);
+  noteEngineAskDeclined('c-dec', 't-dec');
+  assert.equal(engineAskDeclined('c-dec', 't-dec'), true);
+  markOpsDone('c-dec', 't-dec');
+  assert.equal(engineAskDeclined('c-dec', 't-dec'), false);
 });
