@@ -62,6 +62,13 @@ export interface OpsTask {
   // NOT change the brief; it only marks the leg so triage can refuse to retry a retry (one per
   // attempt) and the trace labels read `ops-retry:`.
   retryOf?: string;
+  // Commands the user already said yes to, set ONLY on a late yes's re-run (agents/ops/engineApproval.ts):
+  // when the engine pauses on one of these exact (engine-redacted) command strings, the relay answers
+  // 'once' without asking again. Any other command in that run is asked as usual. ABSENT otherwise.
+  preApproved?: string[];
+  // The task this one continues: a step she offered after it (agents/ops/followUp.ts), or the step a
+  // late yes re-runs. One hop only: a task carrying it never offers a next step of its own.
+  followUpOf?: string;
   // Which attempt this is for the same underlying ask. 1 = first look; 2+ = a re-run after the
   // agent answered a steering question. Drives the composer's two-strike miss behavior (first
   // miss = invisible re-aim; second miss = soft "couldn't find it" + an adjacent offer).
