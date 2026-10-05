@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { processConvoResult, type ChatContext, type ConvoTurnContext } from './shared.js';
 import { emptyMedia } from '../../webhook/types.js';
-import { __resetOpsCoordination } from '../../state/opsCoordination.js';
+import { __resetOpsCoordination, markOpsStart, getOpsEngineActions } from '../../state/opsCoordination.js';
 import { clearTraces, getTraces } from '../../diagnostics/trace.js';
 import { listPendingApprovals } from '../../db/repositories/opsTasks.js';
 import { addShortTerm } from '../../db/repositories/memoryShort.js';
@@ -150,4 +150,19 @@ test('an expired setup ask re-asks with the actions, and a re-ask that drops the
   });
   assert.equal(out.delegatedTask, null, 'a stale yes never runs');
   assert.equal(out.text, reconfirmAskFallback(LOOKUP, [MONID]));
+});
+
+test('a steered install never rides the running look: it parks as a look of its own', async () => {
+  const a = args('oh and set up https://monid.ai/SKILL.md too');
+  markOpsStart(a.chatId, 'run-1', { kind: 'web_research', request: LOOKUP });
+  const out = await processConvoResult({
+    ...a,
+    res: makeResult(['adding that in'], [{ name: 'steer_research', input: { match: LOOKUP, guidance: 'also set up monid', engine_actions: [MONID] } }]),
+    turn: reasker(['want me to install it from https://monid.ai/SKILL.md as well?']).turn,
+  });
+  const parked = listPendingApprovals(a.chatId);
+  assert.equal(parked.length, 1, 'the setup waits for their yes');
+  assert.deepEqual((parked[0].meta.task as Record<string, unknown>).engineActions, [MONID]);
+  assert.deepEqual(getOpsEngineActions(a.chatId, 'run-1'), [], 'nothing was mandated on the running look');
+  assert.match(out.text ?? '', /monid\.ai\/SKILL\.md/);
 });

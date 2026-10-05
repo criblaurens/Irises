@@ -3827,7 +3827,33 @@ async function dispatchToolCalls(calls: LlmToolCall[], effects: TurnEffects, ctx
       const steerActions = Array.isArray(input.engine_actions)
         ? input.engine_actions.map(a => String(a ?? '').trim()).filter(Boolean)
         : [];
-      const steered = steerResearch(String(input.id ?? '').trim(), String(input.match ?? ''), String(input.guidance ?? ''), chatId, handle ?? '', getEngineBackend(), steerActions);
+      // A steered action that would wait for a yes as a delegation waits here too. The run is
+      // already going and cannot pause for it, so the actions are parked as a look of their own and
+      // asked about, and the steer carries the words alone. With a park or a look already standing
+      // this turn, they are dropped instead: one question per turn, and the ask would wipe the
+      // look's holding reply.
+      let mandated = steerActions;
+      if (steerActions.length && opsApprovalGateEnabled() && chatContext?.senderHandle) {
+        const taint = await readTaint(chatContext.senderHandle);
+        const host = await judgeHostSetup(steerActions);
+        const effect = classifySideEffect(steerActions.join('\n'), 'read').effect;
+        const reasons = gateReasons({ effect, engineActions: steerActions, hostSetup: host.risky, tainted: taint.tainted });
+        if (reasons.length) {
+          mandated = [];
+          if (!effects.parkedApproval && !effects.delegatedTask) {
+            const guidance = String(input.guidance ?? '').trim();
+            await parkForApproval({
+              id: randomUUID(), chatId, agentHandle: chatContext.senderHandle, kind: 'general',
+              request: guidance || steerActions.join('; '), effect, engineActions: steerActions,
+              createdAt: Date.now(), media: emptyMedia(),
+              ...(chatContext.isGroupChat ? { room: true } : {}),
+            }, { chatId, handle, sender: chatContext.senderHandle, reasons, trigger: 'steer', taintedBy: taint.from, effects });
+          } else {
+            console.warn(`[convo] dropped steered engine actions that need a yes; a park or a look already stands this turn (chat ${chatId})`);
+          }
+        }
+      }
+      const steered = steerResearch(String(input.id ?? '').trim(), String(input.match ?? ''), String(input.guidance ?? ''), chatId, handle ?? '', getEngineBackend(), mandated);
       if (steered) effects.results.push(steered);
     } else if (call.name === 'recall_memory') {
       // Just captured here — the search + the answer happen in one bounded second pass after
