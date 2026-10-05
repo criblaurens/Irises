@@ -8,7 +8,7 @@ import { detectCause, decide, splitMiss, retryTaskFor, steerReplayTaskFor, type 
 import { selectInterveningUserMessages } from './interveningMessages.js';
 import { redactInternalTools } from './guardrails.js';
 import { getEngineBackend, engineApprovalRelayEnabled } from './ops/engineBackend.js';
-import { createEngineApprovalRelay, clearEngineApproval, skippedEngineStep } from './ops/engineApproval.js';
+import { createEngineApprovalRelay, clearEngineApproval, markEngineApprovalTimedOut, skippedEngineStep } from './ops/engineApproval.js';
 import { voiceOutcome } from './fallfirm/client.js';
 import { type Outcome } from './fallfirm/floor.js';
 import { voiceInstant, type VoiceInstantOpts } from './fallfirm/voiceInstant.js';
@@ -751,11 +751,16 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     // End-to-end latency for the whole delegation, on the single app clock (Convo stamping
     // task.createdAt → this exit): the one number the <60s target is measured against.
     record({ type: 'event', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, label: 'ops:duration', detail: { kind: task.kind, ms: Date.now() - task.createdAt } });
-    // None of this task's queued asks will be asked now, and a live one it left can never be
-    // answered. A skipped one stays for their late yes, unless they called the look off.
+    // None of this task's queued asks will be asked now. A live one it left is a skipped step (its
+    // 'expired' may land a moment after the run does), the same reading the answer's composer took
+    // (skippedEngineStep), so it stays for the late yes the answer promised; a look they called off
+    // leaves nothing.
     if (relay) {
       dropEngineAsks(task.agentHandle, task.id);
-      void clearEngineApproval(task.agentHandle, task.id, isOpsCancelled(task.chatId, task.id)).catch(() => {});
+      const over = isOpsCancelled(task.chatId, task.id)
+        ? clearEngineApproval(task.agentHandle, task.id, true)
+        : markEngineApprovalTimedOut(task.agentHandle, { taskId: task.id });
+      void over.catch(err => console.warn('[orchestrator] failed to settle the engine ask of a finished look', err));
     }
     // Clear this task's in-flight marker LAST, so it outlives the result handoff above. Per-taskId
     // clear means a concurrent distinct task's marker survives. How it ended rides along for the

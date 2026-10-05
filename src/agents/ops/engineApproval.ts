@@ -75,7 +75,17 @@ async function readMarker(sender: string): Promise<EngineApprovalMarker | undefi
   return m?.handle?.runId && m.taskId && m.command && typeof m.askedAt === 'number' ? m : undefined;
 }
 
-const dropMarker = (sender: string) => setPreference(sender, ENGINE_APPROVAL_PREF, null)
+/** Drop (`next` null) or rewrite the marker, but only while it is still the very ask `seen` was:
+ *  the same run and the same `askedAt`. A newer ask written meanwhile is never erased or
+ *  overwritten. Resolves whether it wrote. */
+async function replaceMarker(sender: string, seen: EngineApprovalMarker, next: EngineApprovalMarker | null): Promise<boolean> {
+  const now = await readMarker(sender);
+  if (!now || now.handle.runId !== seen.handle.runId || now.askedAt !== seen.askedAt) return false;
+  await setPreference(sender, ENGINE_APPROVAL_PREF, next);
+  return true;
+}
+
+const dropMarker = (sender: string, seen: EngineApprovalMarker) => replaceMarker(sender, seen, null)
   .catch(err => console.error('[ops] failed to clear pending_engine_approval', err));
 
 /** POST their answer. Never throws: an engine with no route, or a dead one, is 'failed'. */
@@ -137,21 +147,23 @@ export async function armEngineApproval(
 }
 
 /** The run moved on without their answer: the engine refused the step on its own clock. The marker
- *  stays, flagged, so a late yes still gets the step done. Only THIS run's marker is touched. */
-export async function markEngineApprovalTimedOut(sender: string, runId: string): Promise<void> {
+ *  stays, flagged, so a late yes still gets the step done. Only THIS run's marker is touched (`of` a
+ *  run id), or, for a task that is over, whatever ask of THIS task still stands live (`{ taskId }`). */
+export async function markEngineApprovalTimedOut(sender: string, of: string | { taskId: string }): Promise<void> {
   const m = await readMarker(sender);
-  if (!m || m.handle.runId !== runId || m.timedOut) return;
-  await setPreference(sender, ENGINE_APPROVAL_PREF, { ...m, timedOut: true })
-    .catch(err => console.error('[ops] failed to mark pending_engine_approval timed out', err));
-  record({ type: 'event', label: 'ops:engine_approval', chatId: m.chatId, handle: sender, taskId: m.taskId, detail: { decision: 'timed_out', runId } });
+  if (!m || m.timedOut || (typeof of === 'string' ? m.handle.runId !== of : m.taskId !== of.taskId)) return;
+  const wrote = await replaceMarker(sender, m, { ...m, timedOut: true }).catch(err => {
+    console.error('[ops] failed to mark pending_engine_approval timed out', err);
+    return false;
+  });
+  if (wrote) record({ type: 'event', label: 'ops:engine_approval', chatId: m.chatId, handle: sender, taskId: m.taskId, detail: { decision: 'timed_out', runId: m.handle.runId } });
 }
 
-/** The task is over. A live ask it left can never be answered now, so its marker goes; a skipped one
- *  stays for the late yes, unless the look was called off (`evenTimedOut`). Another task's ask is
- *  left alone. */
+/** Drop this task's live ask, and with `evenTimedOut` its skipped one too: a look they called off
+ *  leaves nothing a late yes could re-run. Another task's ask is left alone. */
 export async function clearEngineApproval(sender: string, taskId: string, evenTimedOut = false): Promise<void> {
   const m = await readMarker(sender);
-  if (m && m.taskId === taskId && (evenTimedOut || !m.timedOut)) await dropMarker(sender);
+  if (m && m.taskId === taskId && (evenTimedOut || !m.timedOut)) await dropMarker(sender, m);
 }
 
 /** The step a late yes gets done: a fresh task of its own carrying exactly that command. Kind,
@@ -213,7 +225,7 @@ export async function resolveEngineApproval(
   });
   const state = gatePendingEngineApproval(m, now);
   if (!state) {
-    await dropMarker(a.sender);
+    await dropMarker(a.sender, m);
     rec({ decision: 'lapsed' });
     return NOTHING;
   }
@@ -243,7 +255,7 @@ export async function resolveEngineApproval(
   const target = m.command.slice(0, 80);
   if (consent === 'no') {
     noteEngineAskDeclined(m.chatId, m.taskId);
-    await dropMarker(a.sender);
+    await dropMarker(a.sender, m);
     if (state === 'timed_out') {
       rec({ decision: 'declined', state });
       return { result: { tool: 'engine_approval', status: 'done', target, detail: 'they let the skipped step go; it never ran and nothing more will run for it' }, rerun: null };
@@ -255,7 +267,7 @@ export async function resolveEngineApproval(
   if (state === 'live') {
     const outcome = await answer(m.handle, 'once');
     if (outcome === 'resolved') {
-      await dropMarker(a.sender);
+      await dropMarker(a.sender, m);
       rec({ decision: 'approved', outcome });
       return { result: { tool: 'engine_approval', status: 'done', target, detail: 'that one step is cleared to run and the look carries on' }, rerun: null };
     }
@@ -265,7 +277,7 @@ export async function resolveEngineApproval(
     }
     // 'not_pending': it stopped waiting before the yes landed, which makes this a late yes.
   }
-  await dropMarker(a.sender);
+  await dropMarker(a.sender, m);
   const rerun = lateRerun(m, a.sender, now);
   rec({ decision: 'late_yes', state, rerunId: rerun.id });
   return { result: { tool: 'engine_approval', status: 'done', target, detail: 'that step had stopped waiting, so it is starting again as a fresh run of just that step' }, rerun };
@@ -282,13 +294,14 @@ export interface EngineApprovalRelay {
  * The run side of the relay, one per task, built only with OPS_ENGINE_APPROVAL_RELAY on.
  *  • A command they already said yes to (`task.preApproved`) is answered 'once' with no ask, the
  *    first time only: the same command again in this task is asked about, so one yes never runs it
- *    twice. It is also asked about as usual when that answer could not be delivered.
+ *    twice. It is also asked about as usual when that answer could not be delivered, while the
+ *    engine still waits on it.
  *  • Otherwise the leg's clocks move out by the wait and the ask joins this person's line (one live
  *    at a time, state/opsCoordination.ts). A look they called off asks nothing.
  *  • A wait that ends unanswered marks its ask skipped BEFORE the next in line is asked: the next ask
  *    writes the same marker, and that order is what keeps the newer one standing. A look they called
- *    off leaves no skipped step behind.
- * Every hook is synchronous and never throws; the async work floats with its own catch.
+ *    off leaves no skipped step behind. Either waits for an ask still going out to be recorded.
+ * Every hook is synchronous and never throws; the async work floats with its own catch, which logs.
  */
 export function createEngineApprovalRelay(task: OpsTask, deps: {
   send: (chatId: string, text: string) => Promise<unknown>;
@@ -296,14 +309,17 @@ export function createEngineApprovalRelay(task: OpsTask, deps: {
 }): EngineApprovalRelay {
   const blocked = new Set<string>();
   const preApprovedUsed = new Set<string>();
+  // Each run's ask while it goes out (the send, then the marker), so a wait that ends meanwhile
+  // settles after it: settled first, the ask would then write a live marker over the settling.
+  const arming = new Map<string, Promise<void>>();
   const askAbout = (req: EngineApprovalRequest, extendLeg: (ms: number) => void) => {
     extendLeg(ENGINE_APPROVAL_WAIT_MS);
     enqueueEngineAsk(task.agentHandle, {
       taskId: task.id, runId: req.handle.runId,
       arm: () => {
         if (isOpsCancelled(task.chatId, task.id)) return;
-        void armEngineApproval(task, req, deps.send, deps.engineName)
-          .catch(err => console.warn('[ops] engine approval ask failed', err));
+        arming.set(req.handle.runId, armEngineApproval(task, req, deps.send, deps.engineName)
+          .catch(err => console.warn('[ops] engine approval ask failed', err)));
       },
     });
   };
@@ -315,17 +331,24 @@ export function createEngineApprovalRelay(task: OpsTask, deps: {
         preApprovedUsed.add(req.command);
         void answer(req.handle, 'once').then(outcome => {
           record({ type: 'event', label: 'ops:engine_approval', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, detail: { decision: 'pre_approved', runId: req.handle.runId, outcome } });
-          if (outcome === 'failed') askAbout(req, extendLeg);
-        }).catch(() => {});
+          // Only while the engine still waits on it: a run it already settled takes no place in line.
+          if (outcome === 'failed' && blocked.has(req.handle.runId)) askAbout(req, extendLeg);
+        }).catch(err => console.warn('[ops] failed to relay the pre-approved engine ask', err));
       },
       onApprovalSettled: (handle, how) => {
         blocked.delete(handle.runId);
-        const next = () => settleEngineAsk(task.agentHandle, handle.runId);
-        if (how === 'answered') return next();
-        const settled = isOpsCancelled(task.chatId, task.id)
-          ? clearEngineApproval(task.agentHandle, task.id, true)
-          : markEngineApprovalTimedOut(task.agentHandle, handle.runId);
-        void settled.catch(() => {}).then(next).catch(() => {});
+        const armed = arming.get(handle.runId) ?? Promise.resolve();
+        arming.delete(handle.runId);
+        void armed
+          .then(() => {
+            if (how === 'answered') return;
+            return isOpsCancelled(task.chatId, task.id)
+              ? clearEngineApproval(task.agentHandle, task.id, true)
+              : markEngineApprovalTimedOut(task.agentHandle, handle.runId);
+          })
+          .catch(err => console.warn('[ops] failed to settle the engine ask on their prefs', err))
+          .then(() => settleEngineAsk(task.agentHandle, handle.runId))
+          .catch(err => console.warn('[ops] failed to ask the next engine ask in line', err));
       },
     }),
     waiting: () => blocked.size > 0,

@@ -19,6 +19,7 @@ import { getPreference } from '../../db/repositories/memory.js';
 import { getTraces, clearTraces } from '../../diagnostics/trace.js';
 import { actionSucceeded } from '../convo/actionResults.js';
 import { runTask } from './client.js';
+import { runOpsAndFollowUp } from '../orchestrator.js';
 
 const unclearLane = async () => ({ text: 'UNCLEAR', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' });
 __setConsentLlmForTests(unclearLane);
@@ -185,7 +186,7 @@ test('only the run that stopped waiting has its ask marked skipped', async () =>
   assert.deepEqual(calls, [[REQ.handle, 'once']], 'still live: the yes went to the engine');
 });
 
-test('a skipped step outlives its task; a live ask does not; a look called off leaves neither', async () => {
+test('clearing a task\'s ask drops its live one, and its skipped one only when the look was called off', async () => {
   const live = mkTask();
   await armEngineApproval(live, REQ, quiet, 'hermes');
   await clearEngineApproval(live.agentHandle, 'another-task');
@@ -416,4 +417,101 @@ test('the answer hears about a step its own run left standing, and only its own'
   await markEngineApprovalTimedOut(t.agentHandle, REQ.handle.runId);
   assert.deepEqual(await skippedEngineStep(t.agentHandle, t.id), { command: REQ.command, description: REQ.description });
   assert.equal(await skippedEngineStep(t.agentHandle, 'another-task'), null);
+});
+
+/** A promise the test lets go of: the in-flight window of a send or a POST. */
+function held() {
+  let release!: () => void;
+  const until = new Promise<void>(r => { release = r; });
+  return { until, release };
+}
+
+test('a wait that ends while its ask is still going out settles after the ask is recorded', async () => {
+  __resetOpsCoordination();
+  const t = mkTask();
+  markOpsStart(t.chatId, t.id, { kind: t.kind, request: t.request });
+  const send = held();
+  const relay = createEngineApprovalRelay(t, { send: async () => { await send.until; return 'sent' as const; }, engineName: 'hermes' });
+  const hooks = relay.hooks(() => {});
+  hooks.onApprovalRequest(REQ);
+  await flush();
+  requestOpsCancel(t.chatId, t.id);
+  hooks.onApprovalSettled(REQ.handle, 'expired');
+  send.release();
+  await flush();
+  assert.equal(await engineApprovalWaiting(t.agentHandle), false, 'a look called off leaves no ask a later yes could re-run');
+});
+
+test('a pre-approved answer that fails after the engine stopped waiting asks nothing', async () => {
+  __resetOpsCoordination();
+  const t = mkTask({ preApproved: ['rm -rf ~/scratch'] });
+  const post = held();
+  __setEngineApprovalBackendForTests({ resolveRunApproval: async () => { await post.until; return 'failed'; } } as unknown as EngineBackend);
+  const sent: string[] = []; const extended: number[] = [];
+  try {
+    const { hooks } = relayFor(t, sent, extended);
+    hooks.onApprovalRequest(REQ);
+    hooks.onApprovalSettled(REQ.handle, 'expired');
+    post.release();
+    await flush();
+  } finally {
+    __setEngineApprovalBackendForTests(undefined);
+  }
+  assert.deepEqual(sent, [], 'a settled run takes no place in their line');
+  assert.deepEqual(extended, []);
+});
+
+test('an answer that lands after a newer ask went out never erases the newer ask', async () => {
+  const t1 = mkTask(); const t2 = mkTask({ agentHandle: t1.agentHandle });
+  await armEngineApproval(t1, REQ, quiet, 'hermes');
+  const post = held();
+  __setEngineApprovalBackendForTests({ resolveRunApproval: async () => { await post.until; return 'resolved'; } } as unknown as EngineBackend);
+  try {
+    const answering = resolveEngineApproval(reply(t1, 'yes'));
+    await flush();
+    await armEngineApproval(t2, runB, quiet, 'hermes');
+    post.release();
+    await answering;
+  } finally {
+    __setEngineApprovalBackendForTests(undefined);
+  }
+  const m = await getPreference<{ taskId: string }>(t1.agentHandle, ENGINE_APPROVAL_PREF);
+  assert.equal(m?.taskId, t2.id, 'the newer ask still stands');
+});
+
+test('a run that ends with its ask still live leaves it as a skipped step, for the yes its answer promises', async () => {
+  __resetOpsCoordination();
+  const t = mkTask();
+  resetEngineBackendCache({
+    name: 'hermes',
+    runTask: async (_p: string, _t: OpsTask, ctx: EngineRunContext) => { ctx.onApprovalRequest?.(REQ); await flush(); return 'ANSWER: done\nFLAGS: none'; },
+    async createReminder() { return { id: 'r', title: 't', schedule: 's' }; }, async listReminders() { return []; },
+    async cancelReminder() { return false; }, async remember() {}, async probe() { return { ok: true }; }, async channelSend() { return {}; },
+  });
+  try {
+    await runOpsAndFollowUp(t, async () => 'sent' as const);
+  } finally {
+    resetEngineBackendCache(undefined);
+  }
+  await flush();
+  const m = await getPreference<{ taskId: string; timedOut?: boolean }>(t.agentHandle, ENGINE_APPROVAL_PREF);
+  assert.equal(m?.taskId, t.id, 'still standing after the run');
+  assert.equal(m?.timedOut, true, 'as a skipped step');
+});
+
+test('a relay step that fails says so in the log', async () => {
+  __resetOpsCoordination();
+  const t = mkTask({ preApproved: ['rm -rf ~/scratch'] });
+  const warned: string[] = [];
+  const warn = console.warn;
+  console.warn = (...a: unknown[]) => { warned.push(String(a[0])); };
+  try {
+    await withEngine('failed', [], async () => {
+      createEngineApprovalRelay(t, { send: quiet, engineName: 'hermes' }).hooks(() => { throw new Error('clock gone'); }).onApprovalRequest(REQ);
+      await flush();
+    });
+  } finally {
+    console.warn = warn;
+  }
+  assert.ok(warned.some(w => /pre-approved/.test(w)), `warned: ${JSON.stringify(warned)}`);
 });
