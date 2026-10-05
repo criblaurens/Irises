@@ -86,10 +86,11 @@ test('an act step with no offer words to say yes to does not park', async () => 
 
 test('an offer that reads as an act parks as one, whatever the step the engine named', async () => {
   const t = mkTask();
-  assert.equal(await parkFollowUp(t, 'hold the 9am fare for them', 'ANSWER: x', 'want me to book the 9am for you?'), true);
+  assert.equal(await parkFollowUp(t, 'hold the 9am fare for them', 'ANSWER: x', 'i can book the 9am\nwant that?'), true);
   const task = listPendingApprovals(t.chatId)[0].meta.task as OpsTask;
   assert.equal(task.effect, 'act');
-  assert.match(task.request, /"want me to book the 9am for you\?"/);
+  assert.equal(task.request, 'i can book the 9am / want that?', 'her offer, on one line, and nothing around it');
+  assert.equal((await getPreference<{ request?: string }>(t.agentHandle, 'pending_approval'))?.request, task.request);
 });
 
 function makeResult(bubbles: string[]): LlmResult {
@@ -121,8 +122,8 @@ test('their yes to an offered act authorizes exactly the words she offered, so i
   const out = await yesTo(t);
   const task = out.delegatedTask!;
   assert.equal(task.effect, 'act');
-  assert.match(task.request, /"want me to send it over to them rn\?"/);
-  assert.match(buildTaskPrompt(task), /^AUTHORIZED ACTION: the user explicitly approved this exact action at [^\n]*"want me to send it over to them rn\?"/m);
+  assert.equal(task.request, 'want me to send it over to them rn?');
+  assert.match(buildTaskPrompt(task), /^AUTHORIZED ACTION: the user explicitly approved this exact action at [^\n]*: want me to send it over to them rn\?\. You may perform it\./m);
   assert.match(task.metaPrompt ?? '', /<named_step>\nemail my landlord the signed lease\n<\/named_step>/);
   assert.ok(!buildTaskPrompt({ ...task, metaPrompt: undefined }).includes(next), "the engine's own step rides only in the brief's context");
 });
