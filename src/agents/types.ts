@@ -47,6 +47,10 @@ export interface OpsTask {
   addressHint?: string;
   dealHint?: string;
   replyToMessageId?: string; // inbound message that triggered this task; the follow-up threads back to it
+  // The burst text her holding beat quoted ([msg N], 1-based), set by the salvage when the look is
+  // the turn's only action. index.ts threads the late answer to it; without it the answer took the
+  // first quote in the reply, which is her answer to their other text whenever that came first.
+  lookRe?: number;
   // True when the look was delegated out of a group chat; absent is a 1:1. `agentHandle` stays the
   // member who asked (their prefs, their research stash), so this is what tells the composed relay
   // it speaks in front of a room. Stamped where the delegation is built (convo/shared.ts), so a

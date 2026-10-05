@@ -1032,10 +1032,12 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
     bubbleReport = noteBubbleReport(chatId, buildBubbleReport(shipped, { hardCapped: hardCapped === true, splits: split.splits }));
 
     // If we're delegating, thread the LATE Ops follow-up to the message that actually asked, not the
-    // last burst message (which may be a "thanks"). Prefer the message a holding bubble quoted; else,
-    // in a burst, default to the FIRST message (the substantive ask usually leads).
+    // last burst message (which may be a "thanks"). Prefer the text her holding beat quoted (lookRe),
+    // then any quote in the reply; else, in a burst, default to the FIRST message (the substantive ask
+    // usually leads).
     if (delegatedTask) {
-      const quoted = targets.find(t => t?.message_id)?.message_id;
+      const look = delegatedTask.lookRe != null ? incomingMessageIds[delegatedTask.lookRe - 1] : undefined;
+      const quoted = look ?? targets.find(t => t?.message_id)?.message_id;
       if (quoted) delegatedTask.replyToMessageId = quoted;
       else if (isBurst && incomingMessageIds.length) delegatedTask.replyToMessageId = incomingMessageIds[0];
     }

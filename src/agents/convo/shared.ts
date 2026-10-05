@@ -64,7 +64,7 @@ import { steerWithRetry } from '../ops/steer.js';
 import { etaStatus, estimateOpsEta } from '../etaEstimate.js';
 import { turnNeedsReach } from './reachClassify.js';
 import {
-  salvageHoldingText, refusedCapabilities,
+  salvageHoldingText, salvageHold, refusedCapabilities,
   holdsTheAnswer, heldMemoryBrief, heldMemoryCount, routingGateHitReceipt,
   routingGateMemoryAwareEnabled, type RoutingGateDecision,
 } from '../routingGate.js';
@@ -4543,9 +4543,9 @@ export async function processConvoResult(args: {
   // survives and the user hears the fact twice. Same salvage discipline as the routing gate below: keep
   // ONLY the safe holding-style opener as both the shipped text and (via cleanForRecord) holdingText,
   // discard the un-grounded tail. A pure-holding reply ("lemme check, one sec") salvages whole, so it
-  // ships unchanged. Tradeoff: on a multi-intent turn ("thanks, also pull comps") the leading pleasantry
-  // is lost when it isn't holding-shaped — losing "you're welcome!" is acceptable; shipping an
-  // un-grounded data claim next to the composer's grounded one is not. If salvage yields nothing, the
+  // ships unchanged. When the look is the turn's only action, what comes BEFORE the beat ships too
+  // (her reaction, her answer to anything else they said), and so does a bubble quoted to another of
+  // their texts (routingGate.ts salvageHold); only the tail after the beat is cut. If salvage yields nothing, the
   // !textResponse voiceInstant line below fires as before.
   // Two boundary conditions beyond the obvious `modelDelegated && delegatedTask`:
   //   • suppressedDuplicate: the model re-delegated a dup of an IN-FLIGHT task, so no new task is built
@@ -4569,7 +4569,16 @@ export async function processConvoResult(args: {
     // echo the holding text may repeat, never a fabrication. Keeps Irises's persona-written holding
     // openers shipping instead of being replaced by the voiced fallback line.
     const ground = [textToSend, effects.delegatedTask?.request, effects.delegatedTask?.addressHint, effects.delegatedTask?.dealHint].filter(Boolean).join('\n');
-    const salvaged = salvageHoldingText(draftText, ground);
+    // The look as the turn's only action keeps her whole hold. A turn that also ran actions keeps
+    // the one beat: its draft was written before those ran, and their results are voiced after it.
+    let salvaged: string | null;
+    if (effects.results.length === 0) {
+      const hold = salvageHold(draftText, ground);
+      salvaged = hold?.text ?? null;
+      if (hold?.lookRe != null && effects.delegatedTask) effects.delegatedTask.lookRe = hold.lookRe;
+    } else {
+      salvaged = salvageHoldingText(draftText, ground);
+    }
     const kept = salvaged && needsCorrection(standing) ? dropClaims(salvaged) : salvaged;
     textParts.length = 0;
     if (kept) textParts.push(kept);
