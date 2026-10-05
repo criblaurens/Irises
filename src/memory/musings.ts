@@ -17,6 +17,7 @@
 //     one she keeps texting into;
 //   • the chat has been quiet MUSING_QUIET_MS, so a live conversation keeps the thought for itself;
 //   • at most one musing per MUSING_GAP_MS, and never a second one they have not answered;
+//   • the back-off: nothing while her texts sit unanswered past the limit or they said no (memory/proactiveBackoff.ts);
 //   • an hour, in their zone, when this person tends to be around (theirHours, learned from when they
 //     text; MUSING_HOURS until there is enough history to learn from);
 //   • her own weather: a sad or scared core, a low mood or a spent social battery keeps it to herself.
@@ -38,6 +39,7 @@ import { familiarityEnabled, musingsEnabled, momentsEnabled, selfEnabled } from 
 import { getFamiliarity } from '../db/repositories/familiarity.js';
 import { familiarityBandFor, type FamiliarityBand } from '../persona/familiarity.js';
 import { isGroupHandle } from './identity.js';
+import { readBackoff } from './proactiveBackoff.js';
 import { dayKey, hourInZone } from '../pipeline/chatTime.js';
 import { DEFAULT_TZ } from '../pipeline/zonedTime.js';
 import { affectTargets } from '../persona/affectDrift.js';
@@ -213,6 +215,10 @@ export async function runMusingSweep(deps: MusingDeps, opts: { now?: number; ran
         const lastUserAt = [...rows].reverse().find(m => m.role === 'user')?.at ?? 0;
         if (now - lastUserAt > MUSING_ACTIVE_WITHIN_MS) { skip('gone_quiet'); continue; }
         if (lastMusingAt > lastUserAt) { skip('unanswered'); continue; }
+        // The back-off (memory/proactiveBackoff.ts): while her texts sit unanswered past the limit,
+        // or an ask about texting first does, or they said no, a thought of her own waits. The
+        // ping sweep owns the ask itself.
+        if (await readBackoff(chatId, handle) !== 'ok') { skip('backed_off'); continue; }
 
         // Their zone, and one Intl will accept: a stored zone it rejects reads as the default.
         let tz = (await getPreference<string>(handle, 'agent_tz')) || DEFAULT_TZ;
