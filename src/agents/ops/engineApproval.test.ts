@@ -7,14 +7,17 @@ import assert from 'node:assert/strict';
 import {
   armEngineApproval, resolveEngineApproval, markEngineApprovalTimedOut, clearEngineApproval,
   engineApprovalWaiting, renderEngineApprovalAsk, __setEngineApprovalBackendForTests, ENGINE_ASK_MAX_COMMAND_CHARS,
+  createEngineApprovalRelay, ENGINE_APPROVAL_PREF,
 } from './engineApproval.js';
-import type { EngineBackend, EngineRunHandle } from './engineBackend.js';
+import { ENGINE_APPROVAL_WAIT_MS, resetEngineBackendCache, type EngineBackend, type EngineRunHandle, type EngineRunContext } from './engineBackend.js';
 import { __setConsentLlmForTests } from './consent.js';
 import { PENDING_ASK_TTL_MS } from '../../memory/dossier.js';
-import { markOpsStart, engineAskDeclined, __resetOpsCoordination } from '../../state/opsCoordination.js';
+import { markOpsStart, engineAskDeclined, requestOpsCancel, __resetOpsCoordination } from '../../state/opsCoordination.js';
 import { emptyMedia } from '../../webhook/types.js';
 import type { OpsTask } from '../types.js';
-import { getTraces } from '../../diagnostics/trace.js';
+import { getPreference } from '../../db/repositories/memory.js';
+import { getTraces, clearTraces } from '../../diagnostics/trace.js';
+import { runTask } from './client.js';
 
 const unclearLane = async () => ({ text: 'UNCLEAR', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' });
 __setConsentLlmForTests(unclearLane);
@@ -261,4 +264,117 @@ test('the consent reader is shown a code-written action, never the engine\'s raw
   } finally {
     __setConsentLlmForTests(unclearLane);
   }
+});
+
+const flush = () => new Promise(r => setTimeout(r, 30));
+function relayFor(t: OpsTask, sent: string[], extended: number[]) {
+  const relay = createEngineApprovalRelay(t, { send: async (_c, text) => { sent.push(text); return 'sent' as const; }, engineName: 'hermes' });
+  return { relay, hooks: relay.hooks(ms => { extended.push(ms); }) };
+}
+const runB = { ...REQ, handle: { engine: 'hermes' as const, runId: 'run_b' }, command: 'rm -rf ~/other' };
+
+test('a command they already said yes to is answered once, with no ask and no stretched clock', async () => {
+  __resetOpsCoordination(); clearTraces();
+  const t = mkTask({ preApproved: ['rm -rf ~/scratch'] });
+  const sent: string[] = []; const extended: number[] = []; const calls: Calls = [];
+  await withEngine('resolved', calls, async () => { relayFor(t, sent, extended).hooks.onApprovalRequest(REQ); await flush(); });
+  assert.deepEqual(calls, [[REQ.handle, 'once']]);
+  assert.deepEqual(sent, []);
+  assert.deepEqual(extended, []);
+  assert.equal(getTraces().filter(e => e.label === 'ops:engine_approval').at(-1)?.detail?.decision, 'pre_approved');
+});
+
+test('a pre-approved command is answered for them only once; the same command again is asked about', async () => {
+  __resetOpsCoordination();
+  const t = mkTask({ preApproved: ['rm -rf ~/scratch'] });
+  const again = { ...REQ, handle: { engine: 'hermes' as const, runId: 'run_again' } };
+  const sent: string[] = []; const extended: number[] = []; const calls: Calls = [];
+  await withEngine('resolved', calls, async () => {
+    const { hooks } = relayFor(t, sent, extended);
+    hooks.onApprovalRequest(REQ);
+    hooks.onApprovalRequest(again);
+    await flush();
+  });
+  assert.deepEqual(calls, [[REQ.handle, 'once']], 'only the first is answered for them');
+  assert.deepEqual(sent, [renderEngineApprovalAsk(again, 'hermes')]);
+  assert.deepEqual(extended, [ENGINE_APPROVAL_WAIT_MS]);
+});
+
+test('a pre-approved command whose go-ahead cannot be delivered is asked about as usual', async () => {
+  __resetOpsCoordination();
+  const t = mkTask({ preApproved: ['rm -rf ~/scratch'] });
+  const sent: string[] = []; const extended: number[] = [];
+  await withEngine('failed', [], async () => { relayFor(t, sent, extended).hooks.onApprovalRequest(REQ); await flush(); });
+  assert.equal(sent.length, 1);
+  assert.deepEqual(extended, [ENGINE_APPROVAL_WAIT_MS]);
+});
+
+test('an ask stretches the leg, goes out, and holds the task as waiting until the engine says how it ended', async () => {
+  __resetOpsCoordination();
+  const t = mkTask();
+  const sent: string[] = []; const extended: number[] = [];
+  const { relay, hooks } = relayFor(t, sent, extended);
+  hooks.onApprovalRequest(REQ);
+  await flush();
+  assert.deepEqual(sent, [renderEngineApprovalAsk(REQ, 'hermes')]);
+  assert.deepEqual(extended, [ENGINE_APPROVAL_WAIT_MS]);
+  assert.equal(relay.waiting(), true, 'progress pings stand down');
+  hooks.onApprovalSettled(REQ.handle, 'answered');
+  assert.equal(relay.waiting(), false);
+});
+
+test('a second ask for the same person waits its turn and goes out when the first is answered', async () => {
+  __resetOpsCoordination();
+  const t1 = mkTask(); const t2 = mkTask({ agentHandle: t1.agentHandle });
+  const sent: string[] = [];
+  const a = relayFor(t1, sent, []); const b = relayFor(t2, sent, []);
+  a.hooks.onApprovalRequest(REQ); b.hooks.onApprovalRequest(runB);
+  await flush();
+  assert.equal(sent.length, 1, 'one live ask per person');
+  a.hooks.onApprovalSettled(REQ.handle, 'answered');
+  await flush();
+  assert.deepEqual(sent, [renderEngineApprovalAsk(REQ, 'hermes'), renderEngineApprovalAsk(runB, 'hermes')]);
+});
+
+test('an unanswered ask is marked skipped before the next in line is asked, so the newer ask stands', async () => {
+  __resetOpsCoordination();
+  const t1 = mkTask(); const t2 = mkTask({ agentHandle: t1.agentHandle });
+  const a = relayFor(t1, [], []); const b = relayFor(t2, [], []);
+  a.hooks.onApprovalRequest(REQ); b.hooks.onApprovalRequest(runB);
+  await flush();
+  a.hooks.onApprovalSettled(REQ.handle, 'expired');
+  await flush();
+  const m = await getPreference<{ taskId: string; timedOut?: boolean }>(t1.agentHandle, ENGINE_APPROVAL_PREF);
+  assert.equal(m?.taskId, t2.id);
+  assert.equal(m?.timedOut, undefined);
+});
+
+test('a look called off asks nothing more, and an unanswered ask of it leaves nothing behind', async () => {
+  __resetOpsCoordination();
+  const t = mkTask();
+  markOpsStart(t.chatId, t.id, { kind: t.kind, request: t.request });
+  const sent: string[] = [];
+  const { hooks } = relayFor(t, sent, []);
+  hooks.onApprovalRequest(REQ);
+  await flush();
+  requestOpsCancel(t.chatId, t.id);
+  hooks.onApprovalSettled(REQ.handle, 'expired');
+  hooks.onApprovalRequest(runB);
+  await flush();
+  assert.equal(sent.length, 1, 'no ask after the stop');
+  assert.equal(await engineApprovalWaiting(t.agentHandle), false);
+});
+
+test('runTask hands a leg\'s approval hooks to the engine untouched', async () => {
+  let seen: EngineRunContext = {};
+  resetEngineBackendCache({
+    name: 'hermes',
+    runTask: async (_p: string, _t: OpsTask, ctx: EngineRunContext) => { seen = ctx; return 'ANSWER: done\nFLAGS: none'; },
+    async createReminder() { return { id: 'r', title: 't', schedule: 's' }; }, async listReminders() { return []; },
+    async cancelReminder() { return false; }, async remember() {}, async probe() { return { ok: true }; }, async channelSend() { return {}; },
+  });
+  const hooks = { onApprovalRequest: () => {}, onApprovalSettled: () => {} };
+  try { await runTask(mkTask(), undefined, undefined, undefined, undefined, hooks); } finally { resetEngineBackendCache(undefined); }
+  assert.equal(seen.onApprovalRequest, hooks.onApprovalRequest);
+  assert.equal(seen.onApprovalSettled, hooks.onApprovalSettled);
 });

@@ -174,8 +174,9 @@ export function legBudgetFor(task: OpsTask, env: NodeJS.ProcessEnv = process.env
 /** Execute one delegated task end to end on the configured engine.
  *  @param onProgress optional milestone SIGNAL. The caller (orchestrator) owns throttle + voicing.
  *  @param sink receives the (partial) debrief immediately, so an abandoned run leaves a trail.
- *  @param seedCorpus prior findings (e.g. a first pass's output on a retry) folded into the prompt. */
-export async function runTask(task: OpsTask, onProgress?: (milestoneKey: string) => void, signal?: AbortSignal, sink?: OpsDebriefSink, seedCorpus?: string[]): Promise<OpsResult> {
+ *  @param seedCorpus prior findings (e.g. a first pass's output on a retry) folded into the prompt.
+ *  @param approval the engine paused on a dangerous command, and that wait ended; the orchestrator relays both (ops/engineApproval.ts). Absent: the ask is ignored, as before the relay. */
+export async function runTask(task: OpsTask, onProgress?: (milestoneKey: string) => void, signal?: AbortSignal, sink?: OpsDebriefSink, seedCorpus?: string[], approval?: Pick<EngineRunContext, 'onApprovalRequest' | 'onApprovalSettled'>): Promise<OpsResult> {
   const tracePrefix = task.retryOf ? 'ops-retry' : 'ops';
   const debrief: OpsDebrief = { steps: 0, toolsRun: [], corpus: [], startedAt: Date.now(), endedAt: 0 };
   if (sink) sink.debrief = debrief;
@@ -240,6 +241,7 @@ export async function runTask(task: OpsTask, onProgress?: (milestoneKey: string)
   // an ordinary leg passes none at all, so the adapters keep their module-wide window untouched.
   const ctx: EngineRunContext = {
     onProgress, signal,
+    ...approval,
     ...(browserBudget ? { timeoutMs: computeEngineTimeoutMs(process.env, browserBudget) } : {}),
   };
   return done(await runViaEngine(engine, prompt, task, ctx, debrief));

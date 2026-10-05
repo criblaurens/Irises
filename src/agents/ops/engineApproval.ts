@@ -23,11 +23,11 @@ import { randomUUID } from 'node:crypto';
 import { getPreference, setPreference } from '../../db/repositories/memory.js';
 import { resolveConsent } from './consent.js';
 import {
-  getEngineBackend, engineApprovalRelayEnabled,
-  type EngineApprovalRequest, type EngineBackend, type EngineRunHandle,
+  getEngineBackend, engineApprovalRelayEnabled, ENGINE_APPROVAL_WAIT_MS,
+  type EngineApprovalRequest, type EngineBackend, type EngineRunHandle, type EngineRunContext,
 } from './engineBackend.js';
 import { gatePendingEngineApproval } from '../../memory/dossier.js';
-import { noteEngineAskDeclined } from '../../state/opsCoordination.js';
+import { noteEngineAskDeclined, enqueueEngineAsk, settleEngineAsk, isOpsCancelled } from '../../state/opsCoordination.js';
 import { record } from '../../diagnostics/trace.js';
 import { emptyMedia } from '../../webhook/types.js';
 import type { ActionResult } from '../convo/actionResults.js';
@@ -255,4 +255,65 @@ export async function resolveEngineApproval(
   const rerun = lateRerun(m, a.sender, now);
   rec({ decision: 'late_yes', state, rerunId: rerun.id });
   return { result: { tool: 'engine_approval', status: 'done', target, detail: 'that step had stopped waiting, so it is starting again as a fresh run of just that step' }, rerun };
+}
+
+export interface EngineApprovalRelay {
+  /** One leg's two engine hooks; `extendLeg` moves that leg's own deadline and in-flight horizon. */
+  hooks(extendLeg: (ms: number) => void): Required<Pick<EngineRunContext, 'onApprovalRequest' | 'onApprovalSettled'>>;
+  /** Is a leg of this task blocked on an engine ask right now? Progress pings stand down while it is. */
+  waiting(): boolean;
+}
+
+/**
+ * The run side of the relay, one per task, built only with OPS_ENGINE_APPROVAL_RELAY on.
+ *  • A command they already said yes to (`task.preApproved`) is answered 'once' with no ask, the
+ *    first time only: the same command again in this task is asked about, so one yes never runs it
+ *    twice. It is also asked about as usual when that answer could not be delivered.
+ *  • Otherwise the leg's clocks move out by the wait and the ask joins this person's line (one live
+ *    at a time, state/opsCoordination.ts). A look they called off asks nothing.
+ *  • A wait that ends unanswered marks its ask skipped BEFORE the next in line is asked: the next ask
+ *    writes the same marker, and that order is what keeps the newer one standing. A look they called
+ *    off leaves no skipped step behind.
+ * Every hook is synchronous and never throws; the async work floats with its own catch.
+ */
+export function createEngineApprovalRelay(task: OpsTask, deps: {
+  send: (chatId: string, text: string) => Promise<unknown>;
+  engineName: string;
+}): EngineApprovalRelay {
+  const blocked = new Set<string>();
+  const preApprovedUsed = new Set<string>();
+  const askAbout = (req: EngineApprovalRequest, extendLeg: (ms: number) => void) => {
+    extendLeg(ENGINE_APPROVAL_WAIT_MS);
+    enqueueEngineAsk(task.agentHandle, {
+      taskId: task.id, runId: req.handle.runId,
+      arm: () => {
+        if (isOpsCancelled(task.chatId, task.id)) return;
+        void armEngineApproval(task, req, deps.send, deps.engineName)
+          .catch(err => console.warn('[ops] engine approval ask failed', err));
+      },
+    });
+  };
+  return {
+    hooks: extendLeg => ({
+      onApprovalRequest: req => {
+        blocked.add(req.handle.runId);
+        if (!task.preApproved?.includes(req.command) || preApprovedUsed.has(req.command)) return askAbout(req, extendLeg);
+        preApprovedUsed.add(req.command);
+        void answer(req.handle, 'once').then(outcome => {
+          record({ type: 'event', label: 'ops:engine_approval', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, detail: { decision: 'pre_approved', runId: req.handle.runId, outcome } });
+          if (outcome === 'failed') askAbout(req, extendLeg);
+        }).catch(() => {});
+      },
+      onApprovalSettled: (handle, how) => {
+        blocked.delete(handle.runId);
+        const next = () => settleEngineAsk(task.agentHandle, handle.runId);
+        if (how === 'answered') return next();
+        const settled = isOpsCancelled(task.chatId, task.id)
+          ? clearEngineApproval(task.agentHandle, task.id, true)
+          : markEngineApprovalTimedOut(task.agentHandle, handle.runId);
+        void settled.catch(() => {}).then(next).catch(() => {});
+      },
+    }),
+    waiting: () => blocked.size > 0,
+  };
 }
