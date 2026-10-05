@@ -4,6 +4,7 @@ import { getUpdateStatus, updateChecksLive, type UpdateStatus } from '../../upda
 import type { VersionInfo } from '../../update/version.js';
 import { lastUpgradeFor, type UpdateReceipt } from '../../update/receipt.js';
 import { getEngineBackend, withEngineSlot } from '../ops/engineBackend.js';
+import { resolveEngineApproval, engineApprovalWaiting } from '../ops/engineApproval.js';
 import { browserLegBudgetFor } from '../ops/client.js';
 import type { CapabilitySummary, CapabilityClass, EngineBackend, ReminderPatch, ReminderRef } from '../ops/engineBackend.js';
 import { engineZone } from '../ops/hermesBackend.js';
@@ -39,7 +40,7 @@ import {
   REPLY_LANGUAGE_KEY, applyLanguageRequest, detectEnglishAsk, parseLanguageDirective,
 } from '../../memory/standingSettings.js';
 import { clearReplyLanguage, setReplyLanguage } from '../../memory/replyLanguage.js';
-import { updateDossier, PENDING_ASK_TTL_MS, PENDING_CLARIFICATION_TTL_MS } from '../../memory/dossier.js';
+import { updateDossier, gatePendingApproval, PENDING_ASK_TTL_MS, PENDING_CLARIFICATION_TTL_MS } from '../../memory/dossier.js';
 import { updateRelationshipClimate } from '../../memory/climateDrift.js';
 // The two earned-material passes, both throttled off their own file header and both fire-and-forget
 // beside the climate eval (memory/momentsHarvest.ts, memory/thesisRewrite.ts).
@@ -2979,8 +2980,12 @@ function isParkedMarker(
  * the cost of a false no is her draft on their screen over the question she owed them.
  */
 export async function parkedApprovalStanding(sender: string | undefined): Promise<boolean> {
-  if (!opsApprovalGateEnabled() || !sender) return false;
+  if (!sender) return false;
   try {
+    // Their engine's ask is read first and under its own flag: a reply that may answer it must not
+    // stream before it is read, whatever OPS_APPROVAL_GATE says.
+    if (await engineApprovalWaiting(sender)) return true;
+    if (!opsApprovalGateEnabled()) return false;
     return isParkedMarker(await getPreference<PendingApprovalPref>(sender, 'pending_approval'));
   } catch {
     return true;
@@ -4083,7 +4088,28 @@ export async function processConvoResult(args: {
   // reads as a second drop of the same thing (alreadyCancelled), and her "dropped it" is backed.
   let settledDecline: ActionResult | null = null;
   let settledDeclineRef: CancelledRef | null = null;
-  if (opsApprovalGateEnabled() && chatContext?.senderHandle && !args.archivePass && !args.outcomePass) {
+  // Their engine's ask settles FIRST (ops/engineApproval.ts): it is the newer question, the run is
+  // blocked on it, and a reply that settles it never also settles a parked look. A late yes comes back
+  // as that step's own fresh run, through the same slot an approved park uses. Its own flag
+  // (OPS_ENGINE_APPROVAL_RELAY) is read inside, independent of OPS_APPROVAL_GATE.
+  // A reply that predates the ask answers nothing (`receivedAt`, the newest text's arrival). A yes
+  // that could equally mean a standing parked ask settles neither (`ambiguous`): the parked ask is
+  // read by the same gate the dossier shows its which-one line by, so the two always agree.
+  let settledEngine: ActionResult | null = null;
+  let engineAmbiguous = false;
+  if (chatContext?.senderHandle && !args.archivePass && !args.outcomePass) {
+    const sender = chatContext.senderHandle;
+    const pa = opsApprovalGateEnabled()
+      ? await getPreference<PendingApprovalPref>(sender, 'pending_approval').catch(() => undefined)
+      : undefined;
+    const competing = pa && gatePendingApproval(pa, Date.now()).keep ? pa.request : undefined;
+    const receivedAt = chatContext.arrivals?.length ? Math.max(...chatContext.arrivals.map(x => x.receivedAt)) : undefined;
+    const engineAsk = await resolveEngineApproval({ sender, text: textToSend ?? '', chatId, handle, receivedAt, competing });
+    settledEngine = engineAsk.result;
+    settledTask = engineAsk.rerun;
+    engineAmbiguous = !!engineAsk.ambiguous;
+  }
+  if (!settledEngine && !engineAmbiguous && opsApprovalGateEnabled() && chatContext?.senderHandle && !args.archivePass && !args.outcomePass) {
     const settled = await resolvePendingApproval({
       chatId, handle, sender: chatContext.senderHandle, text: textToSend ?? '',
     });
@@ -4115,8 +4141,9 @@ export async function processConvoResult(args: {
   // What an earlier pass already did rides in as `carried`, and is what backs a claim made here. A
   // no that just dropped the parked action backs one the same way: "cancelled it" is then true of a
   // change this turn made, with no call of her own behind it.
-  const backing = settledDecline
-    ? { ...(args.carried ?? newTurnEffects()), results: [...(args.carried?.results ?? []), settledDecline] }
+  const settledResults = [settledEngine, settledDecline].filter((r): r is ActionResult => r !== null);
+  const backing = settledResults.length
+    ? { ...(args.carried ?? newTurnEffects()), results: [...(args.carried?.results ?? []), ...settledResults] }
     : args.carried;
   // An earlier pass's change backs a claim on the outcome pass only while nothing that turn missed
   // still stands. The pass exists because something missed, and a pass that calls nothing fixes
@@ -4246,6 +4273,8 @@ export async function processConvoResult(args: {
     effects.results.push(settledDecline);
     effects.cancelled.push(settledDeclineRef);
   }
+  // The engine ask's answer is this turn's own result, recorded once, on the first pass.
+  if (settledEngine) effects.results.push(settledEngine);
   // Which way the routing floor went, set on every turn it was EVALUATED on and left undefined on
   // the turns that never reached it (a delegation already built, the recall second pass, no memory
   // identity). Rides the turn receipt so a month of turns can be bucketed by it.

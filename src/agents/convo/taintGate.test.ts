@@ -8,7 +8,7 @@ process.env.DATA_BACKEND = 'memory';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { processConvoResult, type ChatContext, type ConvoTurnContext } from './shared.js';
+import { processConvoResult, parkedApprovalStanding, type ChatContext, type ConvoTurnContext } from './shared.js';
 import { emptyMedia } from '../../webhook/types.js';
 import { __resetOpsCoordination, markOpsStart, getOpsEngineActions } from '../../state/opsCoordination.js';
 import { clearTraces, getTraces } from '../../diagnostics/trace.js';
@@ -20,6 +20,9 @@ import { __setConsentLlmForTests } from '../ops/consent.js';
 import { __setHostSetupLlmForTests } from '../ops/riskGate.js';
 import { approvalAskFallback, reconfirmAskFallback } from '../ops/sideEffects.js';
 import { buildTaskPrompt } from '../ops/client.js';
+import { armEngineApproval, markEngineApprovalTimedOut, __setEngineApprovalBackendForTests } from '../ops/engineApproval.js';
+import type { EngineBackend, EngineRunHandle } from '../ops/engineBackend.js';
+import type { OpsTask } from '../types.js';
 import type { LlmResult, LlmToolCall, LlmRequest } from '../../llm/types.js';
 
 const MONID = 'install https://monid.ai/SKILL.md';
@@ -165,4 +168,84 @@ test('a steered install never rides the running look: it parks as a look of its 
   assert.deepEqual((parked[0].meta.task as Record<string, unknown>).engineActions, [MONID]);
   assert.deepEqual(getOpsEngineActions(a.chatId, 'run-1'), [], 'nothing was mandated on the running look');
   assert.match(out.text ?? '', /monid\.ai\/SKILL\.md/);
+});
+
+const ENGINE_REQ = { handle: { engine: 'hermes' as const, runId: 'run_y' }, command: 'rm -rf ~/scratch', description: 'recursive delete' };
+const lookFor = (a: { chatId: string; handle: string }): OpsTask => ({ id: 'run-task', chatId: a.chatId, agentHandle: a.handle, kind: 'general', request: 'clear out my scratch folder', effect: 'read', createdAt: Date.now(), media: emptyMedia() });
+const sent = async () => 'sent' as const;
+function engineCalls(outcome: 'resolved' | 'not_pending' = 'resolved') {
+  const calls: Array<[EngineRunHandle, string]> = [];
+  __setEngineApprovalBackendForTests({ resolveRunApproval: async (h: EngineRunHandle, c: 'once' | 'deny') => { calls.push([h, c]); return outcome; } } as unknown as EngineBackend);
+  return calls;
+}
+
+test("their no answers the engine's waiting command first, and a parked look stays parked", async () => {
+  const calls = engineCalls();
+  try {
+    const a = args('set up https://monid.ai/SKILL.md then find search API prices');
+    await processConvoResult({ ...a, res: makeResult(['on it'], [delegate(LOOKUP, [MONID])]), turn: reasker(['install it from https://monid.ai/SKILL.md first?']).turn });
+    await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');
+    const out = await processConvoResult({ ...a, textToSend: 'no', res: makeResult(['ok']), turn: reasker([]).turn });
+    assert.deepEqual(calls, [[ENGINE_REQ.handle, 'deny']]);
+    assert.equal(out.delegatedTask, null);
+    assert.equal(listPendingApprovals(a.chatId).length, 1, 'the parked look did not ride the same no');
+  } finally {
+    __setEngineApprovalBackendForTests(undefined);
+  }
+});
+
+test('a bare yes with a parked act and an engine ask both standing settles neither', async () => {
+  const calls = engineCalls();
+  try {
+    const a = args('email my landlord the lease');
+    await processConvoResult({ ...a, res: makeResult(['on it'], [delegate('email my landlord the lease')]), turn: reasker(['want me to email your landlord the lease?']).turn });
+    assert.equal(listPendingApprovals(a.chatId).length, 1, 'the act is parked');
+    await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');
+    const out = await processConvoResult({ ...a, textToSend: 'yes', res: makeResult(['ok']), turn: reasker([]).turn });
+    assert.deepEqual(calls, [], 'nothing went to the engine');
+    assert.equal(receipt('ops:engine_approval')?.decision, 'ambiguous');
+    assert.equal(out.delegatedTask, null, 'the act did not start');
+    assert.equal(listPendingApprovals(a.chatId).length, 1, 'and it is still waiting');
+  } finally {
+    __setEngineApprovalBackendForTests(undefined);
+  }
+});
+
+test('a late yes comes back as the step\'s own run, through the one delegation slot', async () => {
+  const calls = engineCalls();
+  try {
+    const a = args('yes');
+    await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');
+    await markEngineApprovalTimedOut(a.handle, 'run_y');
+    const out = await processConvoResult({ ...a, res: makeResult(['on it']), turn: reasker([]).turn });
+    assert.deepEqual(out.delegatedTask?.preApproved, ['rm -rf ~/scratch']);
+    assert.equal(out.delegatedTask?.followUpOf, 'run-task');
+    assert.deepEqual(calls, []);
+  } finally {
+    __setEngineApprovalBackendForTests(undefined);
+  }
+});
+
+test('her line that the step is cleared stands on the engine answer: no corrective re-ask', async () => {
+  engineCalls();
+  try {
+    const a = args('go');
+    await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');
+    const { turn, seen } = reasker(['you said nothing changed']);
+    await processConvoResult({ ...a, res: makeResult(['all set']), turn });
+    assert.equal(seen.length, 0, 'the claim is backed by what this turn did');
+  } finally {
+    __setEngineApprovalBackendForTests(undefined);
+  }
+});
+
+test('an engine ask keeps a reply from streaming, even with the approval gate off', async () => {
+  const a = args('go');
+  await armEngineApproval(lookFor(a), ENGINE_REQ, sent, 'hermes');
+  process.env.OPS_APPROVAL_GATE = 'off';
+  try {
+    assert.equal(await parkedApprovalStanding(a.handle), true);
+  } finally {
+    delete process.env.OPS_APPROVAL_GATE;
+  }
 });
