@@ -98,6 +98,8 @@
 | `THREADING_PINGS_ENABLED` | Lets her *start* a message about a loop left hanging. **Default on** (`configure.sh --pings on\|off`); hard bounds — one ping per person per week, 48h of silence first, never a group, never twice about the same thing. |
 | `FIRST_MOVE_ENABLED` | The one-time install introduction described above. Default on. |
 
+**Backing off when her texts go unanswered** — no setting needed. After three of her own texts (thread pings, musings) go unanswered, she asks once whether they still want her texting first. If that ask goes unanswered she stays silent until they text. A "no" saves the per-person preference `texts_first=false`, and they can tell her in chat to start again. Reminders, mail and memos they set up are never affected.
+
 `.env.example` is the annotated local template; `deploy/app.env` carries the shared baseline.
 
 
