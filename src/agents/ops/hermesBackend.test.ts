@@ -1724,6 +1724,42 @@ test('runs transport: a run waiting on their answer is not given up on its own c
   assert.deepEqual(settled, ['expired'], 'the abandoned wait still settles, once');
 });
 
+test('runs transport: the approval wait is added to the time the run had left, never in place of it', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
+  const flush = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r)); };
+  let events!: ReadableStreamDefaultController<Uint8Array>;
+  const be = new HermesBackend({
+    fetchFn: routedFetch([
+      submitted('run_add'),
+      { match: /\/run_add\/stop$/, respond: () => new Response('{}', { status: 200 }) },
+      { match: /\/run_add\/events$/, respond: init => new Response(new ReadableStream<Uint8Array>({
+        start(c) {
+          events = c;
+          init.signal?.addEventListener('abort', () => { try { c.error(Object.assign(new Error('aborted'), { name: 'AbortError' })); } catch { /* already closed */ } }, { once: true });
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) },
+    ]),
+  });
+  const settled: string[] = [];
+  let done = false;
+  const result = be.runTask('p', mkTask(), { timeoutMs: 100_000, onApprovalRequest: () => {}, onApprovalSettled: (_h, how) => { settled.push(how); } })
+    .then(v => ({ v }), (e: Error) => ({ e }))
+    .finally(() => { done = true; });
+  await flush();
+  t.mock.timers.tick(60_000); // 40s of the budget left when the ask lands
+  events.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(APPROVAL_FRAME)}\n\n`));
+  await flush();
+  t.mock.timers.tick(340_000); // t=400s: past ask + wait, inside budget + wait
+  await flush();
+  assert.equal(done, false, 'the 40s it had left still stand on top of the wait');
+  t.mock.timers.tick(16_000); // t=416s: past budget + wait
+  await flush();
+  assert.equal(done, true, 'and the hold is that much, no more');
+  const out = await result;
+  assert.equal('e' in out && out.e.name, 'AbortError');
+  assert.deepEqual(settled, ['expired']);
+});
+
 test('runs transport: with no relay hooked an approval.request changes nothing, and the run is given up on its own clock', async () => {
   const be = new HermesBackend({
     fetchFn: routedFetch([

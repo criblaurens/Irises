@@ -818,10 +818,12 @@ export class HermesBackend implements EngineBackend {
     scheduleGiveUp();
     // A dangerous command waiting on THEIR answer (hermes's approval.request) leaves the run idle
     // through no fault of its own, and hermes refuses by itself once its own window runs out. So the
-    // give-up moves out by that wait, once per ask: the run is never abandoned under a question the
-    // user is still reading. Only reached when the caller relays the ask (consumeRunEvents).
+    // give-up moves out by that wait, once per ask, ADDED to whatever time the run had left: the run
+    // is never abandoned under a question the user is still reading, and an answer that lands late
+    // still leaves the approved command the budget it had before the ask. Only reached when the
+    // caller relays the ask (consumeRunEvents).
     const holdForApproval = () => {
-      deadline = Math.max(deadline, Date.now() + ENGINE_APPROVAL_WAIT_MS);
+      deadline = Math.max(deadline, Date.now()) + ENGINE_APPROVAL_WAIT_MS;
       if (timer) clearTimeout(timer);
       scheduleGiveUp();
     };
