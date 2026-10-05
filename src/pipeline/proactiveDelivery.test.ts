@@ -293,3 +293,11 @@ test('retention keeps a settled reminder past the 7-day line, and still sweeps o
   const left = stmt('SELECT id FROM proactive_deliveries').all() as Array<{ id: string }>;
   assert.deepEqual(left.map(r => r.id), [reminder]);
 });
+
+test('a send the mouth drops is settled with the dropped flag, so it never counts as ignored', async () => {
+  const { pipeline } = harness({ sendFollowUp: async () => 'dropped' as const });
+  assert.equal(await pipeline.deliver({ chatId: 'web:drop', kind: 'musing', text: 'seed' }), 'dropped');
+  const row = stmt('SELECT status, meta_json FROM proactive_deliveries').get() as { status: string; meta_json: string };
+  assert.equal(row.status, 'delivered', 'final, never retried');
+  assert.equal(JSON.parse(row.meta_json).dropped, 1);
+});
