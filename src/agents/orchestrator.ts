@@ -180,6 +180,20 @@ export function skippedStepRelay(step: { command: string; description: string } 
 }
 
 /**
+ * What the end of a look does with an engine ask of its own still standing on their prefs. A live
+ * one is a skipped step (its 'expired' may land a moment after the run does), the same reading the
+ * answer's composer took (skippedEngineStep), so it stays, flagged, for the late yes the answer
+ * promised. Nothing promised it when they called the look off, or when the look ended on a
+ * needs_info question, which names no step (skippedStepRelay): then it goes, live or skipped, so
+ * their answer to her question can never run it. Exported for the test.
+ */
+export function settleLookEngineAsk(task: OpsTask, end: ComposeMoment | undefined): Promise<void> {
+  return isOpsCancelled(task.chatId, task.id) || end === 'needs_info'
+    ? clearEngineApproval(task.agentHandle, task.id, true)
+    : markEngineApprovalTimedOut(task.agentHandle, { taskId: task.id });
+}
+
+/**
  * The answer moment's move, stated after the `<prompt>` block — the recency edge, where the
  * flash-tier voice model actually acts on a rule (a view offered mid-prompt as a permission did not
  * fire, Sept 2026). Principle only: a phrase named here gets reused verbatim, so the examples live in
@@ -430,6 +444,7 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
   const stopAllPings = () => { for (const s of pingStops) s(); };
 
   let finalSent = false; // the double-send latch: never voice a failure after an answer already shipped
+  let endMoment: ComposeMoment | undefined; // the moment the look ended on, once it is settled
   try {
     record({
       type: 'delegation', chatId: task.chatId, handle: task.agentHandle, taskId: task.id,
@@ -624,6 +639,7 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     // Info-hole → a TARGETED question (rides the two-strike marker). ask_user is only ever returned for
     // attempt 1 (triage downgrades it to give_up on ≥2), so this only fires on a first look.
     if (triage?.action === 'ask_user' && moment === 'miss' && (task.attempt ?? 1) < 2) moment = 'needs_info';
+    endMoment = moment;
     const giveUp = triage?.action === 'give_up';
 
     stopAllPings(); // final result in hand — no more "still on it" before the (slower) compose+send
@@ -754,16 +770,12 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     // End-to-end latency for the whole delegation, on the single app clock (Convo stamping
     // task.createdAt → this exit): the one number the <60s target is measured against.
     record({ type: 'event', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, label: 'ops:duration', detail: { kind: task.kind, ms: Date.now() - task.createdAt } });
-    // None of this task's queued asks will be asked now. A live one it left is a skipped step (its
-    // 'expired' may land a moment after the run does), the same reading the answer's composer took
-    // (skippedEngineStep), so it stays for the late yes the answer promised; a look they called off
-    // leaves nothing.
+    // None of this task's queued asks will be asked now, and one it left standing is settled by the
+    // way the look ended (settleLookEngineAsk).
     if (relay) {
       dropEngineAsks(task.agentHandle, task.id);
-      const over = isOpsCancelled(task.chatId, task.id)
-        ? clearEngineApproval(task.agentHandle, task.id, true)
-        : markEngineApprovalTimedOut(task.agentHandle, { taskId: task.id });
-      void over.catch(err => console.warn('[orchestrator] failed to settle the engine ask of a finished look', err));
+      void settleLookEngineAsk(task, endMoment)
+        .catch(err => console.warn('[orchestrator] failed to settle the engine ask of a finished look', err));
     }
     // Clear this task's in-flight marker LAST, so it outlives the result handoff above. Per-taskId
     // clear means a concurrent distinct task's marker survives. How it ended rides along for the

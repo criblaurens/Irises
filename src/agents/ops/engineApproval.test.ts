@@ -19,7 +19,7 @@ import { getPreference } from '../../db/repositories/memory.js';
 import { getTraces, clearTraces } from '../../diagnostics/trace.js';
 import { actionSucceeded } from '../convo/actionResults.js';
 import { runTask } from './client.js';
-import { runOpsAndFollowUp } from '../orchestrator.js';
+import { runOpsAndFollowUp, settleLookEngineAsk } from '../orchestrator.js';
 
 const unclearLane = async () => ({ text: 'UNCLEAR', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' });
 __setConsentLlmForTests(unclearLane);
@@ -521,6 +521,18 @@ test('a run that ends with its ask still live leaves it as a skipped step, for t
   const m = await getPreference<{ taskId: string; timedOut?: boolean }>(t.agentHandle, ENGINE_APPROVAL_PREF);
   assert.equal(m?.taskId, t.id, 'still standing after the run');
   assert.equal(m?.timedOut, true, 'as a skipped step');
+});
+
+test('a look that ends on a needs_info question leaves no step their answer to it could run', async () => {
+  const live = mkTask();
+  await armEngineApproval(live, REQ, quiet, 'hermes');
+  await settleLookEngineAsk(live, 'needs_info');
+  assert.equal(await getPreference(live.agentHandle, ENGINE_APPROVAL_PREF), null, 'a live step goes');
+  const skipped = mkTask();
+  await armEngineApproval(skipped, REQ, quiet, 'hermes');
+  await markEngineApprovalTimedOut(skipped.agentHandle, REQ.handle.runId);
+  await settleLookEngineAsk(skipped, 'needs_info');
+  assert.equal(await getPreference(skipped.agentHandle, ENGINE_APPROVAL_PREF), null, 'and so does a skipped one: nothing promised it');
 });
 
 test('a relay step that fails says so in the log', async () => {
