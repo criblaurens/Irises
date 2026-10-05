@@ -16,7 +16,7 @@
 import { hash8 } from './sessionHash.js';
 
 /** Prepended to every delegated task. The standing section is the real contract; this is the cue
- *  that engine mode applies plus the three rules a lapse would make unrecoverable — an engine that
+ *  that engine mode applies plus the rules a lapse would make unrecoverable — an engine that
  *  never got onboarded (or forgot) still gets the limits and the reply shape on every single run.
  *  The never-message-the-user limit is a LIVE hazard here, not a formality: hermes owns the channel
  *  adapters Irises speaks through (hermesBackend.ts channelSend), so its send tools point straight

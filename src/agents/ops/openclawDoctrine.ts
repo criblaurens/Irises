@@ -8,7 +8,7 @@
 import { hash8 } from './sessionHash.js';
 
 /** Prepended to every delegated task. The standing section is the real contract; this is the cue
- *  that engine mode applies plus the three rules a lapse would make unrecoverable — an engine that
+ *  that engine mode applies plus the rules a lapse would make unrecoverable — an engine that
  *  never got onboarded (or forgot) still gets the limits and the reply shape on every single run. */
 export const OPENCLAW_TASK_HEADER = [
   'Engine-mode request from the Irises front line. Your standing "Engine mode" discipline applies; essentials restated:',
