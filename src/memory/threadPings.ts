@@ -17,8 +17,9 @@
 //     dead voice lane for one person must not silence the ping the next person had coming.
 //
 // Gates, in order, all of them cheap and all of them code: both flags → not a room → not already
-// pinged this week → the thread has actually gone quiet → an eligible loop exists → we know where to
-// send it. Only then does anything get written or sent.
+// pinged this week → the thread has actually gone quiet → we know where to send it → an eligible
+// loop exists. Only then does anything get written or sent. The back-off gate runs after the chat
+// lookup.
 
 import { getForgetEpoch, getPreference } from '../db/repositories/memory.js';
 import {
@@ -26,6 +27,7 @@ import {
 } from '../db/repositories/threadInventory.js';
 import { LOOP_EXPIRY_MS, type OpenLoop, type ThreadInventory } from '../persona/threads.js';
 import { isGroupHandle } from './identity.js';
+import { readBackoff } from './proactiveBackoff.js';
 // A pure leaf with no imports of its own — the note further down about src/memory not reaching into
 // src/pipeline is about the modules that reach BACK into src/agents; this one reaches nowhere.
 import { isoWeekParts } from '../pipeline/isoWeek.js';
@@ -56,6 +58,10 @@ function sweepIntervalMs(): number {
 /** Delay before the first sweep, so a restart's own work lands first (initSemanticRecall's number,
  *  for the same reason). */
 const BOOT_DELAY_MS = 60_000;
+
+/** The check-in's payload. A copy of agents/proactive.ts CHECKIN_PAYLOAD (src/memory does not import
+ *  src/agents); threadPings.test.ts pins the two equal. */
+const CHECKIN_PAYLOAD = 'whether they still want you texting them first';
 
 /** Youngest a loop may be before it is worth a ping. Under three days the thing has usually not
  *  HAPPENED yet, and a question about it is not a revisit — it is her hovering. */
@@ -108,12 +114,12 @@ export function pickPingLoop(inventory: ThreadInventory, now: number): OpenLoop 
   return best;
 }
 
-/** The message this module hands the proactive pipeline. Structural, not `ProactiveMessage` itself:
- *  src/memory does not import src/pipeline (which would drag src/agents in behind it), and the real
- *  `deliver` is assignable to this exactly as it stands. */
+/** The message this module hands the proactive pipeline: a callback, or the back-off's one check-in.
+ *  Structural, not `ProactiveMessage` itself: src/memory does not import src/pipeline (which would
+ *  drag src/agents in behind it), and the real `deliver` is assignable to this exactly as it stands. */
 export interface ThreadPingMessage {
   chatId: string;
-  kind: 'callback';
+  kind: 'callback' | 'checkin';
   text: string;
   dedupeKey: string;
 }
@@ -144,7 +150,8 @@ function isoWeek(at: number): string {
  *  `sent` means HANDED OVER, not landed: the pipeline's own verdict (sent / deferred to morning by
  *  quiet hours / duplicate / dropped by the mouth) rides per-send in `sends[].outcome`, because from
  *  here every one of those is the same thing — the question is out of this module's hands and the
- *  week is spent. `failed` is the send that threw. */
+ *  week is spent. `failed` is the send that threw. `skipped_backoff` = held by the back-off;
+ *  `checkins` = the back-off's one ask was handed over. */
 interface SweepCounts {
   considered: number;
   sent: number;
@@ -155,6 +162,8 @@ interface SweepCounts {
   no_candidate: number;
   no_chat: number;
   save_refused: number;
+  skipped_backoff: number;
+  checkins: number;
 }
 
 /** Armed once, at boot. */
@@ -181,7 +190,7 @@ export async function runThreadPingSweep(
   const now = opts.now ?? Date.now();
   const counts: SweepCounts = {
     considered: 0, sent: 0, failed: 0, skipped_group: 0, skipped_budget: 0,
-    skipped_quiet: 0, no_candidate: 0, no_chat: 0, save_refused: 0,
+    skipped_quiet: 0, no_candidate: 0, no_chat: 0, save_refused: 0, skipped_backoff: 0, checkins: 0,
   };
   // The model's own words for the thing live in receipts and in the message, nowhere else.
   const sends: Array<{ handle: string; loopId: string; label: string; outcome: string }> = [];
@@ -209,13 +218,31 @@ export async function runThreadPingSweep(
         if (now - inventory.lastPingAt < PING_BUDGET_MS) { counts.skipped_budget++; continue; }
         if (now - inventory.lastHarvestAt < PING_QUIET_MS) { counts.skipped_quiet++; continue; }
 
-        const loop = pickPingLoop(inventory, now);
-        if (!loop) { counts.no_candidate++; continue; }
-
         // Where a proactive message for this person goes (memory.ts's ensureChatId writes it on
         // every turn). No chat id, no send — there is nowhere to put the question.
         const chatId = (await getPreference<string>(handle, 'chat_id'))?.trim();
         if (!chatId) { counts.no_chat++; continue; }
+
+        // The back-off (memory/proactiveBackoff.ts): her own texts piling up unanswered turn this
+        // slot into one ask, and an unanswered ask, or a no, into silence.
+        const backoff = await readBackoff(chatId, handle);
+        if (backoff === 'silent') { counts.skipped_backoff++; continue; }
+        if (backoff === 'checkin') {
+          // BILL FIRST, like a ping: the week is spent before the send, and no loop is armed — the
+          // ask is about her texting at all, not about any thread.
+          const saved = await saveThreadInventory(handle, { ...inventory, lastPingAt: now }, { ifForgetEpoch: epoch0 });
+          if (!saved) { counts.save_refused++; continue; }
+          const outcome = await deps.deliver({
+            chatId, kind: 'checkin', text: CHECKIN_PAYLOAD,
+            dedupeKey: `backoff:checkin:${handle}:${isoWeek(now)}`,
+          });
+          counts.checkins++;
+          sends.push({ handle, loopId: '', label: 'checkin', outcome });
+          continue;
+        }
+
+        const loop = pickPingLoop(inventory, now);
+        if (!loop) { counts.no_candidate++; continue; }
 
         // BILL FIRST. `offeredAt` puts the loop under the reply path's 72h cooldown so a live turn
         // does not ask the same question tonight, and the pending slot is armed straight to

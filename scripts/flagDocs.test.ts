@@ -39,7 +39,7 @@ import { hermesSessionRotation, runsTransportEnabled } from '../src/agents/ops/h
 import { unkeptPromiseGuardEnabled } from '../src/agents/convo/unkeptPromise.js';
 import { outcomePassEnabled } from '../src/agents/convo/actionResults.js';
 import { starvedRetryEnabled, reasoningDisableEnabled, llmCallTimeoutMs } from '../src/llm/openrouterRequest.js';
-import { browserLegBudgetMs, opsCancelEngineAbortEnabled } from '../src/agents/ops/engineBackend.js';
+import { browserLegBudgetMs, opsCancelEngineAbortEnabled, engineApprovalRelayEnabled } from '../src/agents/ops/engineBackend.js';
 import { leafExamplesExtra } from '../src/persona/idle.js';
 import { hooksEnabled, momentsEnabled, thesisEnabled, shareTurnsEnabled, selfEnabled, musingsEnabled, familiarityEnabled } from '../src/persona/featureFlags.js';
 
@@ -96,6 +96,7 @@ const FLAGS: readonly FlagDoc[] = [
   // The env var IS the switch here: unset means every leg keeps the standard deadline.
   { name: 'OPS_BROWSER_TASK_TIMEOUT_MS', probe: () => onOff(browserLegBudgetMs({}) !== null) },
   { name: 'OPS_CANCEL_ENGINE_ABORT', probe: () => onOff(opsCancelEngineAbortEnabled()) },
+  { name: 'OPS_ENGINE_APPROVAL_RELAY', probe: () => onOff(engineApprovalRelayEnabled()) },
   // Not a boolean — the token IS the transport name, same shape as HERMES_SESSION_ROTATION above.
   { name: 'HERMES_RUN_TRANSPORT', probe: () => (runsTransportEnabled() ? 'runs' : 'chat') },
   // Not a switch at all — a token LIST, and what an operator needs stated is what the idle gate's

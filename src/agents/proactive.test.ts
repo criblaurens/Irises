@@ -9,7 +9,7 @@ import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PROACTIVE_MARK, INTRODUCTION_MARK, fallfirmOutcomeFor, voiceProactive, _internal, type ProactiveKind, type ProactiveContinuity } from './proactive.js';
+import { PROACTIVE_MARK, INTRODUCTION_MARK, CHECKIN_PAYLOAD, fallfirmOutcomeFor, voiceProactive, _internal, type ProactiveKind, type ProactiveContinuity } from './proactive.js';
 import { fallfirmFloor } from './fallfirm/floor.js';
 import { resetStorageForTests, stmt } from '../db/sqlite.js';
 import { insertPending } from '../db/repositories/proactive.js';
@@ -17,9 +17,9 @@ import { saveThreadInventory } from '../db/repositories/threadInventory.js';
 import { defaultThreadInventory, type ThreadTheme } from '../persona/threads.js';
 import { groupHandle } from '../memory/identity.js';
 
-// The five kinds that arrive INTO a thread. `introduction` is the odd one out end to end — a second
+// The six kinds that arrive INTO a thread. `introduction` is the odd one out end to end — a second
 // mark, no orientation beat, no colour — and has its own section at the bottom.
-const KINDS: ProactiveKind[] = ['reminder', 'email', 'memo', 'update', 'callback'];
+const KINDS: ProactiveKind[] = ['reminder', 'email', 'memo', 'update', 'callback', 'checkin'];
 
 beforeEach(() => resetStorageForTests());
 afterEach(() => { delete process.env.CONVO_THREADING_ENABLED; });
@@ -56,7 +56,8 @@ test('caller framing rides between the kind framing and the facts', () => {
 test('each kind is pointed at its own moment, and none of them names machinery', () => {
   for (const kind of KINDS) {
     const instruction = _internal.buildProactiveInstruction({ kind, text: 'x' });
-    assert.match(instruction, /orient|placing|first beat/, `${kind}: the orientation beat is asked for`);
+    // The check-in places nothing: it keeps no score of what went unanswered, so it has no beat to orient.
+    if (kind !== 'checkin') assert.match(instruction, /orient|placing|first beat/, `${kind}: the orientation beat is asked for`);
     assert.doesNotMatch(instruction, /\bcron\b|\bjob\b|\bengine\b|\bwebhook\b/i);
   }
 });
@@ -325,4 +326,13 @@ test('the skip mark alone sends nothing; a beat sent with it ships without it', 
   assert.equal(_internal.applySkipMark('same fires story, nothing moved\n---\n[[skip]]'), 'same fires story, nothing moved');
   assert.equal(_internal.applySkipMark('quiet one today [[skip]]'), 'quiet one today');
   assert.equal(_internal.applySkipMark('no mark here'), 'no mark here');
+});
+
+test('the check-in asks once and keeps no score', () => {
+  const instruction = _internal.buildProactiveInstruction({ kind: 'checkin', text: CHECKIN_PAYLOAD });
+  assert.ok(instruction.startsWith(PROACTIVE_MARK));
+  assert.match(instruction, /still want you starting conversations/);
+  assert.match(instruction, /no count/);
+  assert.ok(instruction.trimEnd().endsWith(`"${CHECKIN_PAYLOAD}"`));
+  assert.match(fallfirmOutcomeFor({ kind: 'checkin', text: CHECKIN_PAYLOAD }).summary, /texting first/);
 });

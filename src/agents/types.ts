@@ -47,6 +47,10 @@ export interface OpsTask {
   addressHint?: string;
   dealHint?: string;
   replyToMessageId?: string; // inbound message that triggered this task; the follow-up threads back to it
+  // The burst text her holding beat quoted ([msg N], 1-based), set by the salvage when the look is
+  // the turn's only action. index.ts threads the late answer to it; without it the answer took the
+  // first quote in the reply, which is her answer to their other text whenever that came first.
+  lookRe?: number;
   // True when the look was delegated out of a group chat; absent is a 1:1. `agentHandle` stays the
   // member who asked (their prefs, their research stash), so this is what tells the composed relay
   // it speaks in front of a room. Stamped where the delegation is built (convo/shared.ts), so a
@@ -58,6 +62,15 @@ export interface OpsTask {
   // NOT change the brief; it only marks the leg so triage can refuse to retry a retry (one per
   // attempt) and the trace labels read `ops-retry:`.
   retryOf?: string;
+  // Commands the user already said yes to, set ONLY on a late yes's re-run (agents/ops/engineApproval.ts):
+  // when the engine pauses on one of these exact (engine-redacted) command strings, the relay answers
+  // 'once' without asking again, the FIRST time only: the same command again in this task is asked
+  // about, so one yes never runs it twice. Any other command in that run is asked as usual. ABSENT
+  // otherwise.
+  preApproved?: string[];
+  // The task this one continues: a step she offered after it (agents/ops/followUp.ts), or the step a
+  // late yes re-runs. One hop only: a task carrying it never offers a next step of its own.
+  followUpOf?: string;
   // Which attempt this is for the same underlying ask. 1 = first look; 2+ = a re-run after the
   // agent answered a steering question. Drives the composer's two-strike miss behavior (first
   // miss = invisible re-aim; second miss = soft "couldn't find it" + an adjacent offer).
@@ -164,6 +177,10 @@ export interface OpsResult {
    *  yet — the orchestrator replays it once as a refinement leg rather than delivering an answer
    *  that quietly ignores the last thing they said. */
   steerUnapplied?: string;
+  /** The engine's NEXT line (ops/client.ts OUTPUT_CONTRACT): one step toward what they want that this
+   *  run did not take, lifted off `summary`. Whether to offer it is hers (ops/followUp.ts). ABSENT
+   *  when the engine named none. */
+  next?: string;
 }
 
 /**

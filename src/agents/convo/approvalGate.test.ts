@@ -133,7 +133,7 @@ test("an act delegation never starts: it is parked, asked about, and the next tu
   assert.equal(out.text, 'want me to send that to your landlord?');
   assert.doesNotMatch(out.text ?? '', /emailing them now/);
 
-  assert.deepEqual(receipt('ops:approval'), { decision: 'requested', trigger: 'both', taskId: parked[0].id });
+  assert.deepEqual(receipt('ops:approval'), { decision: 'requested', trigger: 'both', taskId: parked[0].id, reasons: ['act'] });
   assert.deepEqual(receipt('convo:approval_ask'), { resolved: 'reasked', variant: 'park' });
 
   // And the next turn is told the ask is open — the whole reason the park is durable.

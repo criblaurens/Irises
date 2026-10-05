@@ -1,13 +1,15 @@
 import { runTask, legBudgetFor } from './ops/client.js';
-import { withDeadline, DeadlineError } from './deadline.js';
+import { withDeadline, DeadlineError, type DeadlineExtender } from './deadline.js';
 import { setPreference } from '../db/repositories/memory.js';
 import { addShortTerm } from '../db/repositories/memoryShort.js';
-import { composeWithComposer } from './composerCore.js';
-import { markOpsDone, isOpsCancelled, noteOpsProgress, markOpsRetry, getOpsEtaStatus, getOpsEngineActions, getUnappliedSteers, normalizeRequest } from '../state/opsCoordination.js';
+import { composeWithComposerDetailed } from './composerCore.js';
+import { followUpCandidate, parkFollowUp } from './ops/followUp.js';
+import { markOpsDone, isOpsCancelled, noteOpsProgress, markOpsRetry, getOpsEtaStatus, getOpsEngineActions, getUnappliedSteers, normalizeRequest, extendOpsLeg, dropEngineAsks } from '../state/opsCoordination.js';
 import { detectCause, decide, splitMiss, retryTaskFor, steerReplayTaskFor, type TriageDecision } from './ops/triage.js';
 import { selectInterveningUserMessages } from './interveningMessages.js';
 import { redactInternalTools } from './guardrails.js';
-import { getEngineBackend } from './ops/engineBackend.js';
+import { getEngineBackend, engineApprovalRelayEnabled } from './ops/engineBackend.js';
+import { createEngineApprovalRelay, clearEngineApproval, markEngineApprovalTimedOut, skippedEngineStep } from './ops/engineApproval.js';
 import { voiceOutcome } from './fallfirm/client.js';
 import { type Outcome } from './fallfirm/floor.js';
 import { voiceInstant, type VoiceInstantOpts } from './fallfirm/voiceInstant.js';
@@ -16,6 +18,7 @@ import { record } from '../diagnostics/trace.js';
 import { peekPendingInbound, selectUnseenPending } from '../state/inboundGlance.js';
 import type { SpeakContent, SpeakOpts, SpeakResult } from '../state/mouth.js';
 import { reportError } from '../diagnostics/errorLog.js';
+import { stripReplyTag } from '../state/replyThreading.js';
 import type { OpsTask, OpsResult, OpsDebrief, OpsDebriefSink } from './types.js';
 // Slim note: proactive follow-ups no longer materialize locally — the ENGINE owns scheduling
 // (its cron fires and delivers back through the /api/engine/push endpoint), so the old
@@ -162,6 +165,43 @@ export function steerRelay(unapplied: readonly string[], moment: ComposeMoment):
   return `\n\nwhile you were looking they also added: ${said}. the look already under way could not take that in, so what came back may not cover it. never word the answer as if it does, and if it doesn't cover it, say so in one flat clause.`;
 }
 
+/** Does the look end by asking them to narrow it: a needs_info question, or a miss's steering
+ *  question (a give-up miss asks none)? The two-strike marker and the skipped-step clause read this
+ *  one answer, and through the clause so does the standing step (settleLookEngineAsk). */
+function asksToNarrow(moment: ComposeMoment, giveUp: boolean): boolean {
+  return moment === 'needs_info' || (moment === 'miss' && !giveUp);
+}
+
+/**
+ * The clause for a step this look skipped while it waited on their OK (ops/engineApproval.ts): the
+ * engine asked, nobody answered in time, and the step did not run. A fact to relay, never her call:
+ * she already asked. Their yes still gets it done as a fresh run, which is why they must hear it was
+ * skipped. '' on every look that skipped nothing, and on an ending that asks them to narrow
+ * (asksToNarrow): their answer is to her question, so the step is neither named nor kept. The
+ * command and description are the engine's own text, so each is flattened to one line here: a
+ * newline in either could pass for a prompt heading. Pure; exported for the pin test.
+ */
+export function skippedStepRelay(step: { command: string; description: string } | null, moment: ComposeMoment, giveUp = false): string {
+  if (!step || asksToNarrow(moment, giveUp)) return '';
+  const flat = (s: string) => s.replace(/\s*[\r\n]+\s*/g, ' / ');
+  const what = step.description ? `${flat(step.description)} (${flat(step.command)})` : flat(step.command);
+  return `\n\none step of this look waited on their OK and ran out of time, so it was skipped and did not run: ${what}. say so in one plain clause inside what you send, and say once that a yes from them still gets that step done as a fresh run; the choice stays with them.`;
+}
+
+/**
+ * What the end of a look does with an engine ask of its own still standing on their prefs. ONE
+ * rule: it is kept only when the message they read told them of it (`told`: the composer's own
+ * text went out carrying skippedStepRelay's clause), and then it stays, flagged skipped, for the
+ * late yes that message promised. Every other ending clears it, live or skipped: a look they called
+ * off, one that asked them to narrow, a fallback voicing, a run that threw. A step they were never
+ * told of can never be run by their next reply. Exported for the test.
+ */
+export function settleLookEngineAsk(task: OpsTask, told: boolean): Promise<void> {
+  return isOpsCancelled(task.chatId, task.id) || !told
+    ? clearEngineApproval(task.agentHandle, task.id, true)
+    : markEngineApprovalTimedOut(task.agentHandle, { taskId: task.id });
+}
+
 /**
  * The answer moment's move, stated after the `<prompt>` block — the recency edge, where the
  * flash-tier voice model actually acts on a rule (a view offered mid-prompt as a permission did not
@@ -170,14 +210,41 @@ export function steerRelay(unapplied: readonly string[], moment: ComposeMoment):
  */
 export const VIEW_EDGE = "before you send: you read this before texting them about it, so it reaches them through you. the answer to what they asked goes out first, whole, every fact exactly as it came in. what you make of it rides along after, in your own words. for that line, check what's already between you, the chat above and what you hold about them: when something there touches this finding, something they said, a plan, a worry, a habit, the bit you two run, your line ties the finding to it. when nothing does, your line is about the finding itself, what kind of answer it is and what it says beyond itself, and the NOTICED line is usually where that is. say it as plainly as what came back lets you, as yours, and make it something only someone who read this one could say. it never adds a figure, date, name or claim that would need its own source. heavy news gets a plain, careful view and no joke.";
 
+/**
+ * The answer moment's rule about offers. With no next step on the table it is the standing one;
+ * with one (ops/followUp.ts), offering that step is her call, made against what they are doing now
+ * and in her own mood, and it never goes out as anything but a single yes/no last bubble. Principle
+ * only, like VIEW_EDGE. Exported for the pin test.
+ */
+export function nextStepClause(next?: string): string {
+  return next
+    ? `one step could come next that this look did not take: ${next}. offering it is your call: offer it only when you judge it helps them with what they're doing right now, as one yes/no question in your last bubble, in your own mood; otherwise leave it out`
+    : 'never a "want me to?" question';
+}
+
+/**
+ * Her offer as they saw it, for parkFollowUp: the whole delivered message on one line, reply tags
+ * stripped, bubbles joined with ' / '. Past 600 chars the head goes and the tail stays, because the
+ * offer rides in her last bubble (nextStepClause) and an act's yes authorizes these words. Pure;
+ * exported for the test.
+ */
+export function offerTextOf(deliveredText: string): string {
+  const t = deliveredText.split('\n---\n').map(b => stripReplyTag(b).trim()).filter(Boolean).join(' / ');
+  return t.length > 600 ? '…' + t.slice(-599) : t;
+}
+
 async function composeFollowUp(
   result: OpsResult,
   task: OpsTask,
   moment: ComposeMoment,
-  extras: { missingFields?: string[]; giveUp?: boolean } = {},
-): Promise<string> {
+  extras: { missingFields?: string[]; giveUp?: boolean; next?: string } = {},
+): Promise<{ text: string; toldSkippedStep: boolean; offeredFollowUp: boolean }> {
   const { chatId, agentHandle: handle } = task;
   const attempt = task.attempt ?? 1;
+  // A step this look skipped while it waited on their OK. Empty on every look that skipped nothing.
+  const skippedClause = skippedStepRelay(await skippedEngineStep(handle, task.id), moment, !!extras.giveUp);
+  // Never an offer beside a skipped step: one yes could then mean either.
+  const next = skippedClause ? undefined : extras.next;
 
   let instruction: string;
   if (moment === 'needs_info') {
@@ -207,7 +274,7 @@ async function composeFollowUp(
     // answers that, and holds the rest as one offer. "exactly as written" scopes fidelity to the
     // facts it relays — without the question here, a rich Ops pull reads as "relay all of this".
     // The NOTICED line is named as the material her view is made of.
-    instruction = `here's what you came back with. what they asked: "${task.request}". answer THAT, told to them and told the way you see it: the part that meets them leads, a couple of bubbles, not a report. the NOTICED line, when it's there, is what stood out while you were in there, and your view of this is made of it. anything true but beside their question doesn't go out as a fact of its own, and it can still shape what you think. no mention of what else you hold, and never a "want me to?" question. after the answer, one line that hands the thread back if the moment earns one, or none. whatever you do relay — every number, date, name, ~ and maybe — stays exactly as written:\n\n${result.summary}`;
+    instruction = `here's what you came back with. what they asked: "${task.request}". answer THAT, told to them and told the way you see it: the part that meets them leads, a couple of bubbles, not a report. the NOTICED line, when it's there, is what stood out while you were in there, and your view of this is made of it. anything true but beside their question doesn't go out as a fact of its own, and it can still shape what you think. no mention of what else you hold, and ${nextStepClause(next)}. after the answer, one line that hands the thread back if the moment earns one, or none. whatever you do relay — every number, date, name, ~ and maybe — stays exactly as written:\n\n${result.summary}`;
 
     // The read behind this look was shaky: Convo scored its comprehension of the ask below the
     // clean-delegation band when it launched. The answer is still real — but it answers Convo's
@@ -224,6 +291,8 @@ async function composeFollowUp(
   instruction += engineActionRelay(task, moment, result.summary ?? '');
   // And what they ADDED mid-run that the look never took in. Empty on almost every run.
   instruction += steerRelay(getUnappliedSteers(chatId, task.id), moment);
+  // The skipped step's clause, computed above.
+  instruction += skippedClause;
 
   // Continue straight from the exact holding line Irises last sent, so the late reply reads as one
   // seamless thread, not a fresh delivery. This is a continuity anchor only — never a fact source.
@@ -255,7 +324,7 @@ async function composeFollowUp(
     // last, two-attempt ladder, echo tripwire) lives in composerCore.ts — shared with the proactive
     // path. Everything above is the framing this moment needs; the callback below adds the two
     // clauses that can only be written once the history is in hand.
-    return await composeWithComposer({
+    const { text, offeredFollowUp } = await composeWithComposerDetailed({
       chatId,
       handle,
       buildInstruction: history => {
@@ -289,7 +358,11 @@ async function composeFollowUp(
       edge: moment === 'answer' ? VIEW_EDGE : undefined,
       trace: { chatId, handle, taskId: result.taskId, label: 'composer' },
       errorDetail: { moment },
+      // With a next step on the table, the envelope reports whether her last bubble offered it.
+      ...(next ? { followUp: true as const } : {}),
     });
+    // Told them of a skipped step (best-effort): the composer's own text, written with the clause.
+    return { text, toldSkippedStep: skippedClause !== '', offeredFollowUp };
   } catch (err) {
     console.error('[orchestrator] composeFollowUp failed — handing to Fallfirm', err);
     // The composer's own attempts failed. Fallfirm is the second-chance voicer: it re-voices the
@@ -310,7 +383,7 @@ async function composeFollowUp(
     } else {
       outcome = { kind: 'failed', summary: 'you have their answer but sending it glitched on your end', nextStep: "tell them to ping again and you'll fire it right over" };
     }
-    return voiceOutcome(outcome, chatId, handle);
+    return { text: await voiceOutcome(outcome, chatId, handle), toldSkippedStep: false, offeredFollowUp: false };
   }
 }
 
@@ -337,6 +410,24 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
   // One budget for the entire run — the primary and retry legs draw from the same pool, so the total
   // mid-run update count can never exceed MAX_PROGRESS_PINGS regardless of how many legs fire.
   const pingBudget: PingBudget = { remaining: MAX_PROGRESS_PINGS };
+
+  // hermes's mid-run dangerous-command asks (ops/engineApproval.ts), relayed only with
+  // OPS_ENGINE_APPROVAL_RELAY on; off, no hook is passed and the ask is ignored as before. The ask is
+  // its own message, unpaced, and never dropped by the ping gate: the run is blocked on it.
+  // One relay for the whole task, built before the first leg, so a pre-approved command's one-shot
+  // answer holds across every leg.
+  const relay = engineApprovalRelayEnabled()
+    ? createEngineApprovalRelay(task, {
+      // Verbatim: the command on their screen is the one the engine runs, character for character.
+      send: (chatId, text) => sendFollowUp(chatId, text, { paced: false, verbatim: true }),
+      engineName: getEngineBackend()?.name ?? 'engine',
+    })
+    : null;
+  /** One leg's approval hooks: its own deadline and the task's in-flight horizon move out together. */
+  const approvalHooks = (ext: DeadlineExtender) => relay?.hooks(ms => {
+    ext.extend?.(ms);
+    extendOpsLeg(task.chatId, task.id, ms);
+  });
 
   // Per-leg ping machinery. Each leg (primary, then the cheap retry) gets its OWN gate, so
   // when the primary run is abandoned by a timeout its still-running loop's late onProgress calls hit
@@ -370,10 +461,14 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
           const voicedAt = Date.now();
           void sendFollowUp(task.chatId, text, {
             paced: false,
-            dropIf: () => gate.isStopped || isOpsCancelled(task.chatId, task.id),
+            // …and while an engine ask holds the run: a "still on it" under a question they have not
+            // answered yet reads as if nothing were waiting on them.
+            dropIf: () => gate.isStopped || isOpsCancelled(task.chatId, task.id) || !!relay?.waiting(),
             staleIfSpokenSince: voicedAt,
           }).catch(() => { /* progress is best-effort */ });
         },
+        // Held back before the gate while an engine ask waits, so the wait spends none of the budget.
+        () => !!relay?.waiting(),
       )
         // TERMINAL catch — the one that makes the floated calls below safe. Every caller of
         // voiceAndPing floats it (`void …`), and one of them fires from inside a setTimeout where
@@ -390,6 +485,11 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
   const stopAllPings = () => { for (const s of pingStops) s(); };
 
   let finalSent = false; // the double-send latch: never voice a failure after an answer already shipped
+  // The composer's answer told them of a skipped step (settleLookEngineAsk). Best-effort: it means the
+  // clause was in the composer's instruction and the composer's own text went out, not that the
+  // text is known to name the step. The backstop is resolveEngineApproval's explicit-go rule: a
+  // skipped step runs only on an explicit English go, never on an acknowledgement.
+  let toldSkippedStep = false;
   try {
     record({
       type: 'delegation', chatId: task.chatId, handle: task.agentHandle, taskId: task.id,
@@ -417,9 +517,10 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     const legMs = legBudgetFor(task);
     // Keep the promise: on timeout we must WAIT for the aborted leg to actually settle before a
     // second leg starts, or the two legs bill tools + LLM steps concurrently.
-    const primaryRun = runTask(task, milestoneKey => { noteOpsProgress(task.chatId, task.id, milestoneKey); void primary.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, primaryAbort.signal), sink);
+    const primaryExt: DeadlineExtender = {};
+    const primaryRun = runTask(task, milestoneKey => { noteOpsProgress(task.chatId, task.id, milestoneKey); void primary.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, primaryAbort.signal), sink, undefined, approvalHooks(primaryExt));
     try {
-      result = await withDeadline(primaryRun, legMs, `ops task ${task.id}`);
+      result = await withDeadline(primaryRun, legMs, `ops task ${task.id}`, primaryExt);
     } catch (err) {
       // Only a deadline becomes a triageable synthetic result; a genuine throw goes to the outer catch.
       if (!(err instanceof DeadlineError)) throw err;
@@ -477,9 +578,10 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
       const replay = makePings(PROGRESS_QUIET_MS);
       pingStops.push(() => replay.gate.stop());
       const replayAbort = new AbortController();
-      const replayRun = runTask(replayTask, milestoneKey => { noteOpsProgress(replayTask.chatId, replayTask.id, milestoneKey); void replay.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, replayAbort.signal), undefined, undefined);
+      const replayExt: DeadlineExtender = {};
+      const replayRun = runTask(replayTask, milestoneKey => { noteOpsProgress(replayTask.chatId, replayTask.id, milestoneKey); void replay.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, replayAbort.signal), undefined, undefined, approvalHooks(replayExt));
       try {
-        result = await withDeadline(replayRun, legBudgetFor(replayTask), `ops steer-replay ${task.id}`);
+        result = await withDeadline(replayRun, legBudgetFor(replayTask), `ops steer-replay ${task.id}`, replayExt);
         ladderTask = replayTask;
       } catch (err) {
         // The replay died — keep the FIRST leg's answer. It is a real answer that merely misses the
@@ -543,9 +645,10 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
         const retryTask: OpsTask = retryTaskFor(ladderTask, triage);
         const t0 = Date.now();
         const retryAbort = new AbortController();
-        const retryRun = runTask(retryTask, milestoneKey => { noteOpsProgress(retryTask.chatId, retryTask.id, milestoneKey); void retry.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, retryAbort.signal), undefined, undefined);
+        const retryExt: DeadlineExtender = {};
+        const retryRun = runTask(retryTask, milestoneKey => { noteOpsProgress(retryTask.chatId, retryTask.id, milestoneKey); void retry.voiceAndPing('progress', milestoneKey); }, combineSignals(signal, retryAbort.signal), undefined, undefined, approvalHooks(retryExt));
         try {
-          result = await withDeadline(retryRun, legBudgetFor(retryTask), `ops retry ${task.id}`);
+          result = await withDeadline(retryRun, legBudgetFor(retryTask), `ops retry ${task.id}`, retryExt);
         } catch (err) {
           // Retry died too (deadline or throw) — keep the FIRST result and its classification. The
           // transient ladder is spent here, so this is the incident, not the primary's own blip.
@@ -595,6 +698,13 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
 
     const attempt = task.attempt ?? 1;
 
+    // The step that could come next (ops/followUp.ts). Taken inside the mouth right before the
+    // compose, under the chat lock, so no other look's engine ask arms in this chat between the check
+    // and her offer. Parked only once the answer is out.
+    let next: string | undefined;
+    let offered = false;
+    let deliveredText = '';
+
     // Deliver through the mouth: the durable markers AND the compose call run inside the per-chat
     // lock (the voicer thunk below). Two invariants this buys:
     //   • composeFollowUp reads the genuinely-latest thread — any reply Convo sent while Ops ran is
@@ -619,7 +729,7 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
       // BEAT_SECOND) is terminal, so no marker. AWAIT so the durable marker is committed BEFORE the
       // in-flight flag clears in `finally` — otherwise a fast "ok" could land in the gap and Convo
       // would re-delegate.
-      const askedToNarrow = moment === 'needs_info' || (moment === 'miss' && !giveUp);
+      const askedToNarrow = asksToNarrow(moment, giveUp);
       if (askedToNarrow && attempt < 2) {
         await setPreference(task.agentHandle, 'pending_clarification', {
           request: task.request, kind: task.kind, metaPrompt: task.metaPrompt, attempt, at: Date.now(),
@@ -654,10 +764,14 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
         ]);
       }
 
+      next = await followUpCandidate(task, result, moment === 'answer').catch(() => undefined);
       const composeStart = Date.now();
-      const composed = await composeFollowUp(result, task, moment, { missingFields: triage?.missingFields, giveUp });
+      const composed = await composeFollowUp(result, task, moment, { missingFields: triage?.missingFields, giveUp, next });
       composeMs = Date.now() - composeStart;
-      return composed;
+      toldSkippedStep = composed.toldSkippedStep;
+      offered = composed.offeredFollowUp;
+      deliveredText = composed.text;
+      return composed.text;
     }, {
       // Anchor the out-of-band answer to the user's original question: the FIRST bubble natively
       // quotes the message that asked (replyToMessageId was set to that, never a trailing "thanks"),
@@ -679,6 +793,18 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
       return;
     }
     finalSent = true;
+
+    // Her call, made in the answer just delivered: an offer she ended on waits for their yes like any
+    // parked action, so a bare yes has something to start. Only once the answer is really on their
+    // screen, and only an offer that really is a question. Their yes is to the words they saw, so the
+    // whole message goes along as her offer (ops/followUp.ts): a last bubble alone can be a bare
+    // question that never names the step.
+    if (next) {
+      const parked = offered && deliveredText.trim().endsWith('?')
+        ? await parkFollowUp(task, next, result.summary, offerTextOf(deliveredText)).catch(() => false)
+        : false;
+      record({ type: 'event', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, label: 'ops:follow-up', detail: { offered, parked } });
+    }
   } catch (err) {
     // A cancelled run that errored needs no voicing either — they asked for silence.
     if (isOpsCancelled(task.chatId, task.id)) {
@@ -711,6 +837,13 @@ export async function runOpsAndFollowUp(task: OpsTask, sendFollowUp: SendFollowU
     // End-to-end latency for the whole delegation, on the single app clock (Convo stamping
     // task.createdAt → this exit): the one number the <60s target is measured against.
     record({ type: 'event', chatId: task.chatId, handle: task.agentHandle, taskId: task.id, label: 'ops:duration', detail: { kind: task.kind, ms: Date.now() - task.createdAt } });
+    // None of this task's queued asks will be asked now, and one it left standing is kept only when
+    // the answer that went out told them of it (settleLookEngineAsk).
+    if (relay) {
+      dropEngineAsks(task.agentHandle, task.id);
+      void settleLookEngineAsk(task, toldSkippedStep && finalSent)
+        .catch(err => console.warn('[orchestrator] failed to settle the engine ask of a finished look', err));
+    }
     // Clear this task's in-flight marker LAST, so it outlives the result handoff above. Per-taskId
     // clear means a concurrent distinct task's marker survives. How it ended rides along for the
     // next turn's recently-ended list (a cancel was noted when it was stopped).

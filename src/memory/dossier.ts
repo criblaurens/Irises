@@ -33,6 +33,7 @@ import type { MemoryGateReason, MemoryGateReport, MemoryGateReports } from '../d
 import { scopeHistoryToUser } from './transcript.js';
 import { isGroupHandle } from './identity.js';
 import { shortApprovalId } from '../state/opsCoordination.js';
+import { engineApprovalRelayEnabled, ENGINE_APPROVAL_WAIT_MS } from '../agents/ops/engineBackend.js';
 import { record } from '../diagnostics/trace.js';
 import { reportError } from '../diagnostics/errorLog.js';
 import type { StoredMessage, UserProfile } from '../db/types.js';
@@ -130,7 +131,7 @@ export function renderPendingClarification(pc: PendingClarificationCtx): string 
  *  for either has moved on, and two numbers here would eventually disagree about that. */
 export const PENDING_ASK_TTL_MS = PENDING_CLARIFICATION_TTL_MS;
 
-export interface PendingApprovalCtx { taskId?: string; request?: string; kind?: string; askedAt?: number }
+export interface PendingApprovalCtx { taskId?: string; request?: string; kind?: string; askedAt?: number; origin?: 'follow_up' }
 
 /**
  * Is the approval ask she just made still live? PURE — `now` is injected.
@@ -159,7 +160,62 @@ export function renderPendingApproval(pa: PendingApprovalCtx, nowMs: number): st
   // The id the parked row is addressed by (cancel_research takes it), the way a running lookup and a
   // reminder are shown with theirs.
   const ref = pa.taskId ? `[${shortApprovalId(pa.taskId)}] ` : '';
-  return `## You asked them to approve an action (their next reply is probably the answer)\nYou asked whether to go ahead with: ${ref}"${pa.request}"${when}. It has NOT started, and will not until they say yes — never speak about it as if it were running.\nIf they say yes, it starts as this turn ends: one short line that you are doing it. If they say no, let it go in one line. If they reply about something else, answer that normally — the ask stays open until they settle it.`;
+  // An offer she made after a look (agents/ops/followUp.ts) parks the way an approval ask does, and
+  // reads as what it was. The act wording is byte for byte what it always was.
+  const offer = pa.origin === 'follow_up';
+  const opening = offer
+    ? '## You offered them a next step (their next reply is probably the answer)\nWhat you offered: '
+    : '## You asked them to approve an action (their next reply is probably the answer)\nYou asked whether to go ahead with: ';
+  return `${opening}${ref}"${pa.request}"${when}. It has NOT started, and will not until they say yes — never speak about it as if it were running.\nIf they say yes, it starts as this turn ends: one short line that you are doing it. If they say no, let it go in one line. If they reply about something else, answer that normally — the ${offer ? 'offer' : 'ask'} stays open until they settle it.`;
+}
+
+/** Their engine's ask (agents/ops/engineApproval.ts) as it sits on their prefs: the fields this
+ *  section reads. */
+export interface PendingEngineApprovalCtx {
+  handle?: { engine?: string };
+  request?: string;
+  command?: string;
+  description?: string;
+  askedAt?: number;
+  timedOut?: boolean;
+}
+
+/**
+ * Where the engine's ask stands: 'live' while the engine is still waiting on their word,
+ * 'timed_out' once it stopped waiting (the run moved on without an answer, or more than its window
+ * has passed with no word of how it ended, as after a restart), null when there is nothing to show.
+ * A timed-out ask lives the same clock as her other asks, because a late yes still gets the step
+ * done. The ONE reading: this section, the early-emit gate, the follow-up offer and the reply's
+ * resolution all go through it. OPS_ENGINE_APPROVAL_RELAY off reads as nothing at all.
+ */
+export function gatePendingEngineApproval(m: PendingEngineApprovalCtx | undefined, nowMs: number): 'live' | 'timed_out' | null {
+  if (!m?.command || !m.request || typeof m.askedAt !== 'number') return null;
+  if (!engineApprovalRelayEnabled()) return null;
+  if (nowMs - m.askedAt > PENDING_ASK_TTL_MS) return null;
+  return m.timedOut || nowMs - m.askedAt > ENGINE_APPROVAL_WAIT_MS ? 'timed_out' : 'live';
+}
+
+/** Engine-sourced text rendered into a prompt sits on one line, so it can never open a heading. */
+export const oneLine = (text: string): string => text.replace(/\s*[\r\n]+\s*/g, ' / ');
+
+/**
+ * The engine's-ask section. Live: a look of hers is paused on one step, named exactly, and nothing of
+ * that step runs until they answer; a no that names another way can steer the look with it.
+ * Timed out: that step was skipped, and a yes still gets it done as a fresh run. The step is the
+ * engine's own wording and command (already redacted by it), flattened onto one line.
+ * `competing` is the request of a parked approval ask that is also live: a yes could then mean
+ * either, and runs neither (ops/engineApproval.ts), so she asks which one.
+ */
+export function renderPendingEngineApproval(m: PendingEngineApprovalCtx, state: 'live' | 'timed_out', nowMs: number, competing?: string): string {
+  const engine = m.handle?.engine ?? 'engine';
+  const step = `${m.description ? `${oneLine(m.description)}, ` : ''}running: ${oneLine(m.command ?? '')}`;
+  const both = competing ? `\nBoth this step and "${competing}" are waiting on their yes. A bare yes could mean either and runs nothing, so ask them which one they mean, naming each.` : '';
+  if (state === 'timed_out') {
+    return `## A step of your look was skipped while it waited on their OK\nWhile looking into "${m.request}", their ${engine} stopped before one step and waited for their word: ${step}. No answer came in time, so that step did not run.\nA yes from them still gets it done, as a fresh run of that step. A no lets it go. A reply that is not a clear yes or no to this step runs nothing: ask them plainly whether it should run. If they reply about something else, answer that normally.${both}`;
+  }
+  const ago = formatAgo(typeof m.askedAt === 'number' ? Math.floor(m.askedAt / 1000) : undefined, nowMs);
+  const when = ago ? ` (asked ${ago})` : '';
+  return `## Their ${engine} paused your look on a step that needs their OK (their next reply is probably the answer)\nWhile looking into "${m.request}", their ${engine} stopped before this step and is waiting for their word${when}: ${step}. Nothing of that step runs until they answer.\nA yes lets that one step run. A no refuses it; when the no names another way to do it, steer the running look with that way (steer_research). A reply that is not a clear yes or no to this step runs nothing: ask them plainly whether it should run. If they reply about something else, answer that normally; the step keeps waiting.${both}`;
 }
 
 interface PendingEmailContext {
@@ -200,8 +256,8 @@ export async function buildContextBlockWithHot(
   turn: TurnRelevance | null;
   gates: MemoryGateReports;
   craft: CraftTurnFacts;
-  /** One of HER asks is still outstanding: the steering question after a thin look, or the approval
-   *  ask she parked an action behind. Reported because the idle gate (persona/idle.ts) needs it and
+  /** One of HER asks is still outstanding: the steering question after a thin look, the approval
+   *  ask she parked an action behind, or their engine's ask. Reported because the idle gate (persona/idle.ts) needs it and
    *  this is the only place that reads those two prefs — a caller computing it for itself would
    *  re-read the memory row and, worse, would eventually disagree with the gates above about
    *  whether an ask had aged out. Their next short message is an ANSWER, and answering is work. */
@@ -310,11 +366,20 @@ export async function buildContextBlockWithHot(
   const approvalLive = gatePendingApproval(approval, nowMs).keep;
   if (approvalLive) parts.push(renderPendingApproval(approval as PendingApprovalCtx, nowMs));
 
+  // Their engine's ask: a look of hers paused on a step only their word clears, or that step skipped
+  // while it waited. No topic gate, for the same reason the approval ask has none.
+  const engineAsk = prefs.pending_engine_approval as PendingEngineApprovalCtx | undefined;
+  const engineAskState = gatePendingEngineApproval(engineAsk, nowMs);
+  if (engineAskState) {
+    const competing = approvalLive ? (approval as PendingApprovalCtx).request : undefined;
+    parts.push(renderPendingEngineApproval(engineAsk as PendingEngineApprovalCtx, engineAskState, nowMs, competing));
+  }
+
   // The same two verdicts, read once more as ONE fact for the idle gate: an outstanding question of
   // hers makes their next short message an answer rather than a stall. Taken off the gates rather
   // than off the prefs, so "the section rendered" and "the gate says an ask is live" can never
   // disagree.
-  const pendingAsk = clarification.keep || approvalLive;
+  const pendingAsk = clarification.keep || approvalLive || engineAskState !== null;
 
   // The wrapped memory tiers LAST: preamble → short → medium → flexible (identity/addressing +
   // long doc + directives) in the recency slot; the persona's hard rules stay anchored at the

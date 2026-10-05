@@ -18,7 +18,7 @@ import { voiceProactive, type ProactiveKind, type ProactivePayload } from '../ag
 import { distinctUserHandles } from '../db/repositories/conversations.js';
 import { getMemory, getPreference } from '../db/repositories/memory.js';
 import { addShortTerm } from '../db/repositories/memoryShort.js';
-import { hasRecentDelivery, insertPending, listDue, markDelivered, markFailed } from '../db/repositories/proactive.js';
+import { hasRecentDelivery, insertPending, listDue, markDelivered, markDropped, markFailed } from '../db/repositories/proactive.js';
 import { groupHandle } from '../memory/identity.js';
 import { record } from '../diagnostics/trace.js';
 import { reportError } from '../diagnostics/errorLog.js';
@@ -138,7 +138,9 @@ export function createProactiveDelivery(deps: ProactiveDeliveryDeps): ProactiveD
         () => voice({ kind: msg.kind, text: msg.text, framing: msg.framing }, msg.chatId, handle),
         {},
       );
-      await markDelivered(rowId);
+      // A drop is final like a delivery, but flagged: nobody saw it, so the back-off never counts it.
+      if (result === 'sent') await markDelivered(rowId);
+      else await markDropped(rowId);
       // Mail Irises surfaced is part of what it did today: the short tier is the channel Convo's
       // context block reads, so a same-day "what was that email again?" is answered without a
       // re-dig. (kind, taskId) is uniquely indexed, so a retried delivery writes no second row.

@@ -234,11 +234,15 @@ function reportsOtherwise(before: string): boolean {
 /**
  * The tools whose call is a change made on their behalf, and so the only thing that can back a
  * claim. A lookup is not one: work that is RUNNING backs a promise ("on it") and never a claim that
- * something is done, which is also why a delegation is left off.
+ * something is done, which is also why a delegation is left off. It also names the one change the
+ * TURN makes on their word before her calls run, the engine ask's answer.
  */
 export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'schedule_automation', 'update_automation', 'cancel_automation', 'cancel_research', 'steer_research',
   'set_preference', 'update_directives', 'update_memory', 'remember_user', 'rename_group_chat', 'remove_member',
+  // The answer to their engine's ask (agents/ops/engineApproval.ts), settled before her calls run.
+  // Never a tool she calls, only a result a claim like "it's going ahead" can stand on.
+  'engine_approval',
 ]);
 
 export interface UnbackedClaimVerdict {

@@ -18,7 +18,7 @@ import {
   hasRunningTask, insertRunning, listStranded, markLost, markRetrying, settleOpsTask,
 } from '../db/repositories/opsTasks.js';
 import type { ProactiveMessage, ProactiveOutcome } from '../pipeline/proactiveDelivery.js';
-import { opsStaleMs, requestOpsCancel, type OpsTaskSink } from './opsCoordination.js';
+import { getActiveOps, opsStaleMs, requestOpsCancel, type OpsTaskSink } from './opsCoordination.js';
 
 /** The feature gate (env: OPS_DURABLE_TASKS). Default ON, read at CALL time — the same parse shape
  *  as every sibling flag (threadingEnabled, semanticRecallEnabled, …). Off is byte-identical to no
@@ -120,6 +120,10 @@ export function createOpsTaskRecovery(deps: OpsTaskRecoveryDeps): OpsTaskRecover
       let owned = 0;
       for (const row of rows) {
         try {
+          // A live leg this process still holds is not crash debris: one waiting on the user's
+          // answer to an engine ask reads as in flight past the row's horizon. After a crash the
+          // registry is empty, and a stuck leg with no wait on it reads as stale, so both still go.
+          if (getActiveOps(row.chatId, now).some(o => o.taskId === row.id)) continue;
           // Mark FIRST. A crash between the two writes costs one un-sent follow-up; the other order
           // would cost a follow-up re-sent on every sweep forever.
           if (!markLost(row.id)) continue; // someone settled it under us — not ours to own up to

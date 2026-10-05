@@ -6,10 +6,11 @@
 // wording, and so need no judge: a link, and a filesystem path with an ask around it.
 
 // Type-only (erased at runtime): this module stays dependency-free so the gate's regexes can be
-// unit-tested without dragging the engine adapters into the process. The one runtime import is
-// llm/promptTag.js, which has no imports of its own.
+// unit-tested without dragging the engine adapters into the process. The two runtime imports,
+// llm/promptTag.js and state/replyThreading.js, have no runtime imports of their own.
 import type { CapabilityClass } from './ops/engineBackend.js';
 import { dataTag, neutralizeTagBreakouts } from '../llm/promptTag.js';
+import { parseReplyTag } from '../state/replyThreading.js';
 
 export type GroundingNeed = 'yes' | 'no' | 'maybe';
 
@@ -49,7 +50,8 @@ export function needsGrounding(text: string): GroundingNeed {
 // outcome or carries a figure the user themselves didn't say. One, because the handoff beat is one
 // bubble by persona design, and because every bubble kept beside it is one more place for a claim to
 // ride. Only when no beat survives does the caller fall to the Fallfirm-voiced line — Fallfirm is
-// the fallback, never the override.
+// the fallback, never the override. A turn whose only action is the look keeps more than the one
+// beat: its whole hold, through salvageHold below.
 
 // A bubble that CLAIMS something happened / was found (or not found) — the fabrication surface.
 const CLAIMS_RESULT = /\b(pulled|checked|searched|scanned|went through|found|surfaced|came (?:up|back)|turned up|shows?|says?|looks like|according to|no (?:results?|matches?|luck|record)|nothing (?:surfaced|came|found|matched|there)|couldn'?t find|didn'?t (?:find|see)|there'?s (?:no|nothing)|don'?t have)\b/i;
@@ -78,6 +80,21 @@ const ACK_MAX_WORDS = 8; // an ack is a beat, not a paragraph — anything longe
 // Digit-runs in `text` (e.g. "412", "410000" from "$410,000") — the unit of the grounding check.
 const digitRuns = (text: string): string[] => (text.match(/\d+/g) ?? []).map(r => r.replace(/^0+(?=\d)/, ''));
 
+// The screen both salvages share. A bubble that asserts an outcome, asks, or carries a figure the
+// user themselves didn't say is where an un-grounded answer rides. It reads the bubble with its
+// `[[re:N]]` routing tag already taken off: the tag's index names which of their texts the bubble
+// quotes, and read as a figure it failed every quoting bubble of a burst.
+function unsafeBubble(text: string, groundRuns: string[]): boolean {
+  if (CLAIMS_RESULT.test(text)) return true;      // an asserted outcome — the un-grounded part
+  if (text.includes('?')) return true;            // a question isn't a holding line
+  // Figures: safe only when every digit-run is an echo of the user's own ask.
+  const runs = digitRuns(text);
+  return runs.length > 0 && (text.includes('$') || !runs.every(r => groundRuns.some(g => g.includes(r))));
+}
+
+// The beat: a line that holds (still on it, going to look) or nothing but a sound or a nod.
+const isBeat = (text: string): boolean => HOLDING_LIKE.test(text) || ACK_BEAT.test(text);
+
 /**
  * Keep the human part of a delegation-turn draft: its ONE holding beat, the first bubble that is
  * holding-like or nothing but a sound/nod (ACK_BEAT), in the legacy `\n---\n` wire format in and out.
@@ -95,15 +112,62 @@ export function salvageHoldingText(legacyText: string | null, ground?: string): 
   if (!legacyText) return null;
   const groundRuns = ground ? digitRuns(ground) : [];
   for (const bubble of legacyText.split(/\n---\n/).map(b => b.trim()).filter(Boolean)) {
-    if (CLAIMS_RESULT.test(bubble)) return null;    // an asserted outcome — the un-grounded part
-    if (bubble.includes('?')) return null;          // a question isn't a holding line
-    // Figures: safe only when every digit-run is an echo of the user's own ask.
-    const runs = digitRuns(bubble);
-    if (runs.length && (bubble.includes('$') || !runs.every(r => groundRuns.some(g => g.includes(r))))) return null;
-    if (HOLDING_LIKE.test(bubble) || ACK_BEAT.test(bubble)) return bubble;
-    if (!(ACK_LIKE.test(bubble) && bubble.split(/\s+/).length <= ACK_MAX_WORDS)) return null; // neither a beat nor a short opener — stop rather than guess
+    const { text } = parseReplyTag(bubble);
+    if (unsafeBubble(text, groundRuns)) return null;
+    if (isBeat(text)) return bubble;
+    if (!(ACK_LIKE.test(text) && text.split(/\s+/).length <= ACK_MAX_WORDS)) return null; // neither a beat nor a short opener — stop rather than guess
   }
   return null;
+}
+
+/** The hold a turn keeps when the look is its only action. */
+export interface SalvagedHold {
+  /** The kept bubbles in the legacy `\n---\n` wire format, routing tags intact. */
+  text: string;
+  /** The text of theirs the beat answers: its own `[[re:N]]`, else the nearest one above it; null
+   *  when nothing is quoted. The look's late answer threads back to this text. */
+  lookRe: number | null;
+}
+
+/**
+ * The whole holding reply of a turn whose only action is the look, the shape the delegate tool's
+ * doc asks for (convo/tools.ts): her reaction and anything else of theirs she answered, then the
+ * leaving line. salvageHoldingText keeps one beat and stops at any opener longer than a sound, so a
+ * reaction sent the whole draft to the voiced line and an answer to their other text was cut.
+ *
+ * Every bubble before the beat is kept, and the beat. Past the beat a bubble is kept only when its
+ * quote (its own tag, or the one it inherits from the bubble above) names a different text of theirs
+ * than the beat's: an answer to that text, which the look will never voice. Anything else past the
+ * beat is the tail the composer re-answers from the real result, so it is cut. The shared screen
+ * stops the walk at the first unsafe bubble wherever it sits, and with no beat kept the result is
+ * null, so the voiced line takes over as before.
+ */
+export function salvageHold(legacyText: string | null, ground?: string): SalvagedHold | null {
+  if (!legacyText) return null;
+  const groundRuns = ground ? digitRuns(ground) : [];
+  const kept: string[] = [];
+  let quoted: number | null = null;          // the text of theirs this bubble answers
+  let lookRe: number | null | undefined;     // undefined until the beat is found
+  for (const bubble of legacyText.split(/\n---\n/).map(b => b.trim()).filter(Boolean)) {
+    const { index, text } = parseReplyTag(bubble);
+    if (index != null) quoted = index;
+    if (unsafeBubble(text, groundRuns)) break;
+    if (lookRe === undefined) {
+      kept.push(bubble);
+      if (isBeat(text)) lookRe = quoted;
+      continue;
+    }
+    if (lookRe === null || quoted === null || quoted === lookRe) break;
+    kept.push(bubble);
+  }
+  return lookRe === undefined ? null : { text: kept.join('\n---\n'), lookRe };
+}
+
+/** The beat of a kept hold, without its routing tag: its first bubble that holds the line. A whole
+ *  hold can carry a reaction before the beat and an answer to their other text after it, so the beat
+ *  is neither its first bubble nor its last. Undefined when no bubble reads as a beat. */
+export function holdBeat(legacyText: string): string | undefined {
+  return legacyText.split(/\n---\n/).map(b => parseReplyTag(b.trim()).text.trim()).find(t => t && isBeat(t));
 }
 
 // ── False-capability-refusal screen ─────────────────────────────────────────────────────────────

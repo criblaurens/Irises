@@ -142,6 +142,9 @@ export function redactInternalTools(text: string | null | undefined): string {
 
 // Whole lines that are pure back-office machinery (the "how"/where the Composer always drops).
 const OPS_DROP_LINE = /^\s*(?:SOURCE|FLAGS|ACTIONS)\s*:/i;
+// The engine's NEXT line (ops/client.ts), dropped like SOURCE when one leaks. Upper case ONLY: this
+// runs on every outbound bubble, and a bubble of hers may open with "next:".
+const OPS_DROP_NEXT = /^\s*NEXT\s*:/;
 // Labels that prefix a real value — drop the label, keep the value.
 const OPS_STRIP_LABEL = /^\s*(?:ANSWER|NOTICED|NO RESULT|SUMMARY|SUBJECT|SENDER)\s*:\s*/i;
 
@@ -214,7 +217,7 @@ export function stripOpsScaffolding(text: string | null | undefined): string {
   let hit = false;
   const kept: string[] = [];
   for (const line of text.split('\n')) {
-    if (OPS_DROP_LINE.test(line)) { hit = true; continue; }        // SOURCE:/FLAGS: → drop the line
+    if (OPS_DROP_LINE.test(line) || OPS_DROP_NEXT.test(line)) { hit = true; continue; }        // SOURCE:/FLAGS: → drop the line
     const stripped = line.replace(OPS_STRIP_LABEL, '');            // ANSWER:/Subject:/… → keep value
     if (stripped !== line) hit = true;
     kept.push(stripped);

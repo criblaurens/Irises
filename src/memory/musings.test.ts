@@ -12,7 +12,7 @@ import {
   currentWeather, weatherAllows, theirHours,
 } from './musings.js';
 import { FAMILIARITY_BANDS } from '../persona/familiarity.js';
-import { resetStorageForTests } from '../db/sqlite.js';
+import { resetStorageForTests, stmt } from '../db/sqlite.js';
 import { addMessage } from '../db/repositories/conversations.js';
 import { saveFamiliarity } from '../db/repositories/familiarity.js';
 import { getTraces, clearTraces } from '../diagnostics/trace.js';
@@ -128,4 +128,19 @@ test('an hour seen on one day only is not theirs yet', () => {
   const hours = theirHours(times, JKT)!;
   assert.ok(hours.has(20));
   assert.ok(!hours.has(9));
+});
+
+// ── the back-off ──────────────────────────────────────────────────────────────────────────────
+// Musings never send the check-in (they cannot stack past one unanswered on their own); they only
+// stand down while the back-off is anything but ok.
+test('the sweep stands down while the back-off holds', async () => {
+  process.env.CONVO_FAMILIARITY_ENABLED = 'off';
+  const later = Date.now() + 1_000;   // after beforeEach's 'morning'
+  stmt(
+    `INSERT INTO proactive_deliveries (id, chat_id, kind, text, meta_json, dedupe_key, status, deliver_after, created_at, delivered_at)
+     VALUES ('c1', ?, 'checkin', 'x', '{}', 'k1', 'delivered', NULL, ?, ?)`
+  ).run(CHAT, later, later);
+  const r = await sweep();
+  assert.equal(r.skipped.backed_off, 1);
+  assert.equal(r.calls.length, 0);
 });

@@ -15,7 +15,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { HermesBackend, hermesSessionKey, hermesSessionRotation, jobPrefix, legacyJobPrefix, reminderJobPrompt, parseReminderInstruction, shiftCronToEngineZone, shiftCronBetweenZones, inlineLocalImage, normalizeCapabilities, runsTransportEnabled, manifestSupportsRuns } from './hermesBackend.js';
 import { HERMES_TASK_HEADER, HERMES_ONBOARDING_MESSAGE, hermesOnboardingVersion } from './hermesDoctrine.js';
-import { EngineUnavailableError, EngineRunError, runViaEngine, type EngineRunHandle } from './engineBackend.js';
+import { EngineUnavailableError, EngineRunError, runViaEngine, type EngineRunHandle, type EngineApprovalRequest } from './engineBackend.js';
 import { getTraces, clearTraces } from '../../diagnostics/trace.js';
 import { emptyMedia } from '../../webhook/types.js';
 import type { OpsTask, OpsDebrief } from '../types.js';
@@ -137,7 +137,7 @@ test('runTask: the doctrine header restates the limits that matter most on a gat
   const content = String(JSON.parse(String(captured[0].init.body)).messages[0].content);
   assert.ok(content.startsWith(HERMES_TASK_HEADER), 'nothing precedes the header');
   assert.match(HERMES_TASK_HEADER, /NEVER message the user on any channel yourself/);
-  assert.match(HERMES_TASK_HEADER, /ANSWER \/ NOTICED \/ SOURCE \/ optional ACTIONS \/ FLAGS/);
+  assert.match(HERMES_TASK_HEADER, /ANSWER \/ NOTICED \/ SOURCE \/ optional ACTIONS \/ optional NEXT \/ FLAGS/);
   assert.match(HERMES_TASK_HEADER, /"NO RESULT:"/, 'the miss protocol survives an engine that never onboarded');
   // The hermes delegate lane deliberately withholds the parallel-subagent invitation (tools.ts,
   // pinned by delegateToolLane.test.ts) — the doctrine must not contradict the brief.
@@ -1660,4 +1660,132 @@ test('HERMES_RUN_TRANSPORT=chat: the old chat-completions body, byte for byte', 
       stream: false,
     });
   });
+});
+
+const APPROVAL_FRAME = { event: 'approval.request', command: 'rm -rf ~/scratch', description: 'recursive delete', choices: ['once', 'session', 'always', 'deny'] };
+
+test('runs transport: an approval.request reaches the relay with the command, and approval.responded settles it answered', async () => {
+  const be = new HermesBackend({
+    fetchFn: routedFetch([
+      submitted('run_ap'),
+      { match: /\/run_ap\/events$/, respond: () => eventStream(APPROVAL_FRAME, { event: 'approval.responded', choice: 'once' }, { event: 'run.completed', output: 'done' }) },
+    ]),
+  });
+  const asked: EngineApprovalRequest[] = [];
+  const settled: Array<[EngineRunHandle, string]> = [];
+  const out = await be.runTask('p', mkTask(), { onApprovalRequest: r => { asked.push(r); }, onApprovalSettled: (h, how) => { settled.push([h, how]); } });
+  assert.equal(out, 'done');
+  assert.deepEqual(asked, [{ handle: { engine: 'hermes', runId: 'run_ap' }, command: 'rm -rf ~/scratch', description: 'recursive delete' }]);
+  assert.deepEqual(settled, [[{ engine: 'hermes', runId: 'run_ap' }, 'answered']]);
+});
+
+test('runs transport: any other frame after an approval.request means nobody answered in time', async () => {
+  const be = new HermesBackend({
+    fetchFn: routedFetch([
+      submitted('run_ex'),
+      { match: /\/run_ex\/events$/, respond: () => eventStream(APPROVAL_FRAME, { event: 'tool.completed', tool: 'terminal' }, { event: 'run.completed', output: 'done' }) },
+    ]),
+  });
+  const settled: string[] = [];
+  await be.runTask('p', mkTask(), { onApprovalRequest: () => {}, onApprovalSettled: (_h, how) => { settled.push(how); } });
+  assert.deepEqual(settled, ['expired']);
+});
+
+test('runs transport: a stream that ends under a waiting ask settles it expired before the poll takes over', async () => {
+  const be = new HermesBackend({
+    fetchFn: routedFetch([
+      submitted('run_lost'),
+      { match: /\/run_lost\/events$/, respond: () => eventStream(APPROVAL_FRAME) },
+      { match: /\/v1\/runs\/run_lost$/, respond: () => json200({ status: 'completed', output: 'polled' }) },
+    ]),
+  });
+  const settled: string[] = [];
+  assert.equal(await be.runTask('p', mkTask(), { onApprovalRequest: () => {}, onApprovalSettled: (_h, how) => { settled.push(how); } }), 'polled');
+  assert.deepEqual(settled, ['expired']);
+});
+
+test('runs transport: a run waiting on their answer is not given up on its own clock', async () => {
+  const be = new HermesBackend({
+    fetchFn: routedFetch([
+      submitted('run_hold'),
+      { match: /\/run_hold\/stop$/, respond: () => new Response('{}', { status: 200 }) },
+      { match: /\/run_hold\/events$/, respond: init => hangingEventStream(init, APPROVAL_FRAME) },
+    ]),
+  });
+  const ac = new AbortController();
+  const settled: string[] = [];
+  let done = false;
+  const p = be.runTask('p', mkTask(), { timeoutMs: 40, signal: ac.signal, onApprovalRequest: () => {}, onApprovalSettled: (_h, how) => { settled.push(how); } })
+    .finally(() => { done = true; });
+  await sleep(120);
+  assert.equal(done, false, 'three budgets later it is still waiting on them');
+  ac.abort();
+  await assert.rejects(p, (e: Error) => e.name === 'AbortError');
+  assert.deepEqual(settled, ['expired'], 'the abandoned wait still settles, once');
+});
+
+test('runs transport: the approval wait is added to the time the run had left, never in place of it', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 0 });
+  const flush = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r)); };
+  let events!: ReadableStreamDefaultController<Uint8Array>;
+  const be = new HermesBackend({
+    fetchFn: routedFetch([
+      submitted('run_add'),
+      { match: /\/run_add\/stop$/, respond: () => new Response('{}', { status: 200 }) },
+      { match: /\/run_add\/events$/, respond: init => new Response(new ReadableStream<Uint8Array>({
+        start(c) {
+          events = c;
+          init.signal?.addEventListener('abort', () => { try { c.error(Object.assign(new Error('aborted'), { name: 'AbortError' })); } catch { /* already closed */ } }, { once: true });
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }) },
+    ]),
+  });
+  const settled: string[] = [];
+  let done = false;
+  const result = be.runTask('p', mkTask(), { timeoutMs: 100_000, onApprovalRequest: () => {}, onApprovalSettled: (_h, how) => { settled.push(how); } })
+    .then(v => ({ v }), (e: Error) => ({ e }))
+    .finally(() => { done = true; });
+  await flush();
+  t.mock.timers.tick(60_000); // 40s of the budget left when the ask lands
+  events.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(APPROVAL_FRAME)}\n\n`));
+  await flush();
+  t.mock.timers.tick(340_000); // t=400s: past ask + wait, inside budget + wait
+  await flush();
+  assert.equal(done, false, 'the 40s it had left still stand on top of the wait');
+  t.mock.timers.tick(16_000); // t=416s: past budget + wait
+  await flush();
+  assert.equal(done, true, 'and the hold is that much, no more');
+  const out = await result;
+  assert.equal('e' in out && out.e.name, 'AbortError');
+  assert.deepEqual(settled, ['expired']);
+});
+
+test('runs transport: with no relay hooked an approval.request changes nothing, and the run is given up on its own clock', async () => {
+  const be = new HermesBackend({
+    fetchFn: routedFetch([
+      submitted('run_off'),
+      { match: /\/run_off\/stop$/, respond: () => new Response('{}', { status: 200 }) },
+      { match: /\/run_off\/events$/, respond: init => hangingEventStream(init, APPROVAL_FRAME) },
+    ]),
+  });
+  const debrief = mkDebrief();
+  await runViaEngine(be, 'p', mkTask(), { timeoutMs: 40 }, debrief);
+  assert.equal(debrief.failure?.cause, 'timeout');
+});
+
+test('resolveRunApproval posts the one-command choice and maps every answer without throwing', async () => {
+  const captured: Captured[] = [];
+  const be = new HermesBackend({
+    fetchFn: routedFetch([
+      { match: /\/run_ok\/approval$/, respond: () => json200({ object: 'hermes.run.approval_response', choice: 'once', resolved: 1 }) },
+      { match: /\/run_gone\/approval$/, respond: () => new Response('{"error":"approval_not_pending"}', { status: 409 }) },
+      { match: /\/run_err\/approval$/, respond: () => new Response('oops', { status: 500 }) },
+    ], captured),
+  });
+  assert.equal(await be.resolveRunApproval({ engine: 'hermes', runId: 'run_ok' }, 'once'), 'resolved');
+  assert.equal(String(captured[0].init.method), 'POST');
+  assert.deepEqual(JSON.parse(String(captured[0].init.body)), { choice: 'once' });
+  assert.equal(await be.resolveRunApproval({ engine: 'hermes', runId: 'run_gone' }, 'deny'), 'not_pending');
+  assert.equal(await be.resolveRunApproval({ engine: 'hermes', runId: 'run_err' }, 'once'), 'failed');
+  assert.equal(await be.resolveRunApproval({ engine: 'hermes', runId: 'run_nowhere' }, 'once'), 'failed', 'a dead transport is a failure, never a throw');
 });

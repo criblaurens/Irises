@@ -55,6 +55,7 @@ export const DYN_SECTION_IDS = [
   'conversation_timing',  // renderConversationTiming
   'reply_order',          // renderArrivalGap OR renderReplyOrder — never both
   'unsend',               // the bubbles an unsend can reach — only on a turn the tool is offered
+  'checkin',              // the back-off's open ask — only on the turn after an unanswered check-in
   'extra',                // the caller's addendum (`extraSection`)
   'hooks',                // renderHooksSection — this turn's rhythm contract; '' on a task turn
   'turn_focus',           // renderTurnFocus — LAST, always: what they just said and what touches it

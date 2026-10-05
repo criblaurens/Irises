@@ -157,12 +157,10 @@ test('the fallback beat steers off her recent beats', async () => {
   assert.equal(out.text, HOLDING.web_research!.at(-1), 'the one line she has not sent lately');
 });
 
-test('multi-intent (pleasantry + delegate): her own holding line ships as the one beat, no data leaks', async () => {
+test('multi-intent (pleasantry + delegate): her pleasantry and her holding line both ship, no data leaks', async () => {
   const a = baseArgs();
-  // "you're welcome!" is an ack opener leading into a real holding bubble. The salvage keeps ONE beat,
-  // so the opener is stepped over, and her own holding line ships (the 2026-07-06 Fallfirm-override
-  // fix: model text is kept whenever safe, Fallfirm only fills genuine gaps). The digits ("55 Birch")
-  // are the user's own words, so they're a safe echo.
+  // "you're welcome!" comes before the beat, and the look is the turn's only action, so her whole
+  // hold ships (salvageHold). The digits ("55 Birch") are the user's own words, so they're a safe echo.
   const res = makeResult(
     ["you're welcome!", "pulling comps on 55 Birch now"],
     [delegate('comps on 55 Birch')],
@@ -170,7 +168,7 @@ test('multi-intent (pleasantry + delegate): her own holding line ships as the on
   const out = await processConvoResult({ ...a, res, textToSend: 'thanks, also pull comps on 55 Birch' });
 
   assert.ok(out.delegatedTask);
-  assert.equal(out.text, 'pulling comps on 55 Birch now', 'her own holding line ships, not a generated one');
+  assert.equal(out.text, "you're welcome!\n---\npulling comps on 55 Birch now", 'her whole hold ships, not a generated line');
   assert.equal(out.delegatedTask!.holdingText, out.text);
 });
 
@@ -186,8 +184,8 @@ test("persona-example holding text with the user's own address digits ships verb
   const out = await processConvoResult({ ...a, res, textToSend: 'pull comps on 412 Maple' });
 
   assert.ok(out.delegatedTask);
-  assert.equal(out.text, 'pulling the comps on 412 Maple now',
-    "Convo's own beat ships — Fallfirm never overrides a safe model-written holding text");
+  assert.equal(out.text, "okay that's a real question\n---\npulling the comps on 412 Maple now",
+    "Convo's own hold ships — Fallfirm never overrides a safe model-written holding text");
   assert.equal(out.delegatedTask!.holdingText, out.text);
 });
 
@@ -231,4 +229,43 @@ test('schedule + delegate: the reminder confirmation survives (salvage must not 
   assert.equal(bubbles[0], 'pulling comps on 55 Birch now', 'the holding line for the lookup leads');
   assert.ok(bubbles.length > 1 && bubbles.slice(1).join(' ').trim().length > 0,
     'the reminder confirmation was not swallowed by the delegation holding line');
+});
+
+// An envelope whose bubbles carry `re`, the way a burst reply quotes each of their texts.
+function makeTaggedResult(bubbles: { text: string; re: number | null }[], toolCalls: LlmToolCall[]): LlmResult {
+  const base = makeResult([], toolCalls);
+  return { ...base, text: JSON.stringify({ ...JSON.parse(base.text as string), bubbles }) };
+}
+
+test('burst + delegate: her beat and her answer to their other text both ship, and the look keeps its own text', async () => {
+  const a = baseArgs();
+  const res = makeTaggedResult(
+    [
+      { text: 'on the commit thing, lemme check', re: 1 },
+      { text: 'and who, the ppl reachin out to work with u', re: 2 },
+    ],
+    [delegate('average commit frequency for solo projects on GitHub')],
+  );
+  const out = await processConvoResult({ ...a, res, textToSend: 'no i mean, just search the average commit of solo project on github\n\nwho?' });
+
+  assert.ok(out.delegatedTask);
+  assert.equal(out.text, '[[re:1]]on the commit thing, lemme check\n---\n[[re:2]]and who, the ppl reachin out to work with u');
+  assert.equal(out.delegatedTask!.lookRe, 1, 'the late answer threads to the text the look came from');
+  assert.equal(out.delegatedTask!.holdingText, 'on the commit thing, lemme check\n---\nand who, the ppl reachin out to work with u');
+  // Her recent beat is the beat, not the answer to their other text that follows it.
+  for (let i = 0; i < 5 && !(await recentHoldingBeats(a.chatId)).length; i++) await new Promise(r => setTimeout(r, 5));
+  assert.deepEqual(await recentHoldingBeats(a.chatId), ['on the commit thing, lemme check']);
+});
+
+test('one text, two asks: her answer to the other ask ships ahead of the leaving line', async () => {
+  const a = baseArgs();
+  const res = makeResult(
+    ['the ppl reachin out to work with u', 'lemme check the commit thing'],
+    [delegate('average commit frequency for solo projects on GitHub')],
+  );
+  const out = await processConvoResult({ ...a, res, textToSend: 'search the avg commits for solo github projects. also who did u mean?' });
+
+  assert.ok(out.delegatedTask);
+  assert.equal(out.text, 'the ppl reachin out to work with u\n---\nlemme check the commit thing');
+  assert.equal(out.delegatedTask!.lookRe, undefined, 'nothing was quoted, so the default threading stands');
 });

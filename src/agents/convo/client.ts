@@ -18,6 +18,7 @@ import { timestampLabel } from '../../pipeline/chatTime.js';
 import { DEFAULT_TZ } from '../../pipeline/zonedTime.js';
 import { getAffectState } from '../../db/repositories/affectState.js';
 import { unsendOffer } from '../../state/unsend.js';
+import { unansweredProactiveKinds } from '../../db/repositories/proactive.js';
 import {
   getRelationshipClimate, relationshipClimateEnabled,
 } from '../../db/repositories/relationshipClimate.js';
@@ -469,6 +470,11 @@ export async function chat(
   // The list itself — order included — lives in tools.ts (convoToolList); the flags are read HERE so
   // that function stays pure and testable.
   const unsendBubbles = unsendOffer(chatId).map(b => b.text);
+  // The back-off's open ask (memory/proactiveBackoff.ts): did a check-in go out after their previous
+  // message? Then this message is their answer to it. 1:1 only — the sweeps never text a room.
+  const prevUserAt = [...history].reverse().find(m => m.role === 'user')?.at ?? 0;
+  const checkinAwaiting = !(chatContext?.isGroupChat ?? false)
+    && (await unansweredProactiveKinds(chatId, prevUserAt)).includes('checkin');
   const tools: LlmToolDef[] = convoToolList({
     engineName,
     isGroupChat: chatContext?.isGroupChat ?? false,
@@ -832,7 +838,7 @@ export async function chat(
   // What stands live beyond the running lookups (convo/shared.ts LiveState): their reminders, read
   // above within its budget, the lookups that ended in the last few minutes, and her own recent
   // holding beats from the batch above.
-  const liveState = { reminders: await liveRemindersRead, endedOps: getRecentlyEndedOps(chatId), holdingBeats, unsendBubbles };
+  const liveState = { reminders: await liveRemindersRead, endedOps: getRecentlyEndedOps(chatId), holdingBeats, unsendBubbles, checkinAwaiting };
   const prompt = buildSystemPromptSections(chatContext, contextBlock, activeOps, updateNote ?? undefined, tools, history, textToSend, userTz, affectState, computed, capabilitySummary, climate, thread, introWeave, turnFocus, craftFacts, personaTurn, liveState);
   const system = prompt.system;
 

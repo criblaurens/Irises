@@ -34,7 +34,7 @@ test('the output contract asks for a NOTICED line between ANSWER and SOURCE', ()
 
 test('both per-task headers name the NOTICED line in the reply shape', () => {
   for (const header of [HERMES_TASK_HEADER, OPENCLAW_TASK_HEADER]) {
-    assert.match(header, /ANSWER \/ NOTICED \/ SOURCE \/ optional ACTIONS \/ FLAGS/);
+    assert.match(header, /ANSWER \/ NOTICED \/ SOURCE \/ optional ACTIONS \/ optional NEXT \/ FLAGS/);
   }
 });
 

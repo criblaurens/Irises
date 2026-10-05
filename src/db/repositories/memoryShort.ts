@@ -104,35 +104,38 @@ export async function addShortTerm(e: {
   }
 }
 
+type ShortQuery = { kinds?: ShortKind[]; chatId?: string; sinceMs?: number; limit?: number };
+
+/** Non-expired entries for a handle, newest first. THROWS on a DB error. */
+function queryShortTerm(handle: string, opts: ShortQuery): ShortTermEntry[] {
+  const where = ['agent_handle = ?', 'expires_at > ?'];
+  const params: Array<string | number> = [handle, Date.now()];
+  if (opts.kinds?.length) {
+    where.push(`kind IN (${opts.kinds.map(() => '?').join(', ')})`);
+    params.push(...opts.kinds);
+  }
+  if (opts.chatId) {
+    where.push('chat_id = ?');
+    params.push(opts.chatId);
+  }
+  if (opts.sinceMs) {
+    where.push('created_at > ?');
+    params.push(opts.sinceMs);
+  }
+  // rowid breaks same-millisecond ties so entries still come back newest-first —
+  // two inserts can land in one ms under load.
+  const rows = stmt(
+    `SELECT * FROM memory_short WHERE ${where.join(' AND ')}
+     ORDER BY created_at DESC, rowid DESC LIMIT ?`
+  ).all(...params, opts.limit ?? 30) as unknown as ShortRow[];
+  return rows.map(fromRow);
+}
+
 /** Non-expired entries for a handle, newest first. Reads degrade to [] — a hiccup here
  *  must never kill a turn (Convo just re-delegates). */
-export async function listShortTerm(
-  handle: string,
-  opts: { kinds?: ShortKind[]; chatId?: string; sinceMs?: number; limit?: number } = {},
-): Promise<ShortTermEntry[]> {
-  const limit = opts.limit ?? 30;
+export async function listShortTerm(handle: string, opts: ShortQuery = {}): Promise<ShortTermEntry[]> {
   try {
-    const where = ['agent_handle = ?', 'expires_at > ?'];
-    const params: Array<string | number> = [handle, Date.now()];
-    if (opts.kinds?.length) {
-      where.push(`kind IN (${opts.kinds.map(() => '?').join(', ')})`);
-      params.push(...opts.kinds);
-    }
-    if (opts.chatId) {
-      where.push('chat_id = ?');
-      params.push(opts.chatId);
-    }
-    if (opts.sinceMs) {
-      where.push('created_at > ?');
-      params.push(opts.sinceMs);
-    }
-    // rowid breaks same-millisecond ties so entries still come back newest-first —
-    // two inserts can land in one ms under load.
-    const rows = stmt(
-      `SELECT * FROM memory_short WHERE ${where.join(' AND ')}
-       ORDER BY created_at DESC, rowid DESC LIMIT ?`
-    ).all(...params, limit) as unknown as ShortRow[];
-    return rows.map(fromRow);
+    return queryShortTerm(handle, opts);
   } catch (error) {
     logDbError('listShortTerm', error);
     return [];
@@ -143,6 +146,11 @@ export async function listShortTerm(
 export async function latestShortTerm(handle: string, kinds: ShortKind[]): Promise<ShortTermEntry | null> {
   const list = await listShortTerm(handle, { kinds, limit: 1 });
   return list[0] ?? null;
+}
+
+/** latestShortTerm that THROWS on a DB error, for fail-closed callers (the taint gate). */
+export function latestShortTermStrict(handle: string, kinds: ShortKind[]): ShortTermEntry | null {
+  return queryShortTerm(handle, { kinds, limit: 1 })[0] ?? null;
 }
 
 /** Force-expire entries now — a SCOPED retirement (e.g. drop this handle's email flags once

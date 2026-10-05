@@ -578,8 +578,11 @@ test('every reported section is a known id, named once, in assembly order', () =
  *      SIZE at a full history by convo/promptBudget.test.ts's media fixture.
  *    • unsend — pushed only on a turn the unsend tool is offered, and its list is her own sent
  *      bubbles. Its PUSH SITE and its tool gate are pinned in state/unsend.test.ts, its SIZE at the
- *      widest list by convo/promptBudget.test.ts's media fixture. */
-const GOLDEN_EXEMPT: ReadonlySet<string> = new Set(['turn_focus', 'hooks', 'thesis', 'self', 'owed', 'live_reminders', 'recent_beats', 'unsend']);
+ *      widest list by convo/promptBudget.test.ts's media fixture.
+ *    • checkin — pushed only on the turn after an unanswered check-in (memory/proactiveBackoff.ts).
+ *      Its PUSH SITE and its tail placement are pinned in convo/checkinSection.test.ts, its SIZE by
+ *      convo/promptBudget.test.ts's media fixture. */
+const GOLDEN_EXEMPT: ReadonlySet<string> = new Set(['turn_focus', 'hooks', 'thesis', 'self', 'owed', 'live_reminders', 'recent_beats', 'unsend', 'checkin']);
 
 test('the fixtures between them exercise every dyn section — no push site left unnamed', () => {
   const seen = new Set(FIXTURES.flatMap(f => buildSystemPromptSections(...f.args).sections.map(s => s.name)));

@@ -17,6 +17,19 @@ import { __resetOpsCoordination, getActiveOps, markOpsStart } from '../../state/
 import { listPendingApprovals } from '../../db/repositories/opsTasks.js';
 import { buildTaskPrompt } from '../ops/client.js';
 import type { LlmResult, LlmToolCall } from '../../llm/types.js';
+import { __setHostSetupLlmForTests } from '../ops/riskGate.js';
+import type { OpsTask } from '../types.js';
+
+// The host-setup lane, faked: an action the English list cannot read would otherwise be a network
+// call in a unit suite.
+__setHostSetupLlmForTests(async () => ({ text: 'SAFE', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' }));
+
+/** The task the turn built: handed back for kickoff, or parked behind their yes (an install waits). */
+function builtTask(out: { delegatedTask: OpsTask | null }, chatId: string): OpsTask {
+  const task = out.delegatedTask ?? (listPendingApprovals(chatId)[0]?.meta.task as OpsTask | undefined);
+  assert.ok(task, 'the turn built a task');
+  return task;
+}
 
 // The shape the incident had: one setup the engine performs on its own side, one thing to find out.
 const SETUP = 'install the skill published at the url they gave and the CLI it needs';
@@ -59,10 +72,9 @@ test('a two-part ask carries the acting half on the task, in the order it was as
     })]),
     turn,
   });
-  assert.ok(out.delegatedTask, 'the look goes out');
-  assert.deepEqual(out.delegatedTask!.engineActions, [SETUP, 'run the CLI once to confirm it answers'],
+  assert.deepEqual(builtTask(out, a.chatId).engineActions, [SETUP, 'run the CLI once to confirm it answers'],
     'both actions ride the task, in order, nothing dropped');
-  assert.equal(out.delegatedTask!.request, ASK);
+  assert.equal(builtTask(out, a.chatId).request, ASK);
 });
 
 // The incident end to end, in one test: the whole ask leaves the turn, and the prompt the engine is
@@ -74,7 +86,7 @@ test('the task the turn built renders an engine prompt that carries both halves'
     res: makeResult(['on it'], [delegate({ request: ASK, engine_actions: [SETUP] })]),
     turn,
   });
-  const prompt = buildTaskPrompt(out.delegatedTask!, { now: Date.parse('2026-09-19T09:30:00Z'), tz: 'UTC' });
+  const prompt = buildTaskPrompt(builtTask(out, a.chatId), { now: Date.parse('2026-09-19T09:30:00Z'), tz: 'UTC' });
   assert.match(prompt, /Required actions \(do these first, they are part of the assignment, not optional\):/);
   assert.match(prompt, new RegExp(`^1\\. ${SETUP}$`, 'm'));
   assert.ok(prompt.indexOf(SETUP) < prompt.indexOf('<user_request>'), 'in the instruction layer');
@@ -108,17 +120,27 @@ test('a garbled or empty actions argument leaves the field off rather than track
   }
 });
 
-// The approval gate exists for actions on the USER's accounts. An action on the engine's own
-// environment is not one, and nothing in the side-effect lexicon reads it as one — so it runs
-// straight through rather than parking behind a yes. Deliberate, and pinned here so it stays so.
-//
-// The pin has a twin below, and the two only hold together: the same argument that says a setup
-// needs no yes is what a mislabelled entry would ride through the gate on.
-test('an engine-side setup is not an act on the world: it starts, it does not park', async () => {
+// The approval gate's first reason is an action on the USER's accounts. An action on the engine's
+// own environment is not one: it never becomes `act`. Since 2026-10-04 an install still waits for
+// a yes, as host setup (agents/ops/riskGate.ts), and a setup that brings nothing new in starts.
+test('an engine-side install waits for a yes as host setup, and stays a read', async () => {
   const a = args('set that skill up and then look this up');
   const out = await processConvoResult({
     ...a,
     res: makeResult(['on it'], [delegate({ request: ASK, engine_actions: [SETUP] })]),
+    turn,
+  });
+  assert.equal(out.delegatedTask, null, 'nothing starts');
+  const task = listPendingApprovals(a.chatId)[0]?.meta.task as Record<string, unknown>;
+  assert.equal(task.effect, 'read', 'a setup is never an act on the world');
+  assert.deepEqual(task.engineActions, [SETUP]);
+});
+
+test('an engine-side setup that brings nothing new in starts straight away', async () => {
+  const a = args('check again in two hours');
+  const out = await processConvoResult({
+    ...a,
+    res: makeResult(['on it'], [delegate({ request: ASK, engine_actions: ['set yourself a follow-up check in two hours'] })]),
     turn,
   });
   assert.ok(out.delegatedTask, 'the task goes out for kickoff');
@@ -163,7 +185,7 @@ test('the rendered block tells the engine what it may NOT be asked to do', async
     res: makeResult(['on it'], [delegate({ request: ASK, engine_actions: [SETUP] })]),
     turn,
   });
-  const prompt = buildTaskPrompt(out.delegatedTask!, { now: Date.parse('2026-09-19T09:30:00Z'), tz: 'UTC' });
+  const prompt = buildTaskPrompt(builtTask(out, a.chatId), { now: Date.parse('2026-09-19T09:30:00Z'), tz: 'UTC' });
   assert.match(prompt, /These are actions on your own side\./);
   assert.match(prompt, /touch the user's accounts, messages, money or bookings/);
   assert.match(prompt, /refuse it and report it as refused on the ACTIONS line/);

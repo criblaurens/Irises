@@ -473,6 +473,7 @@ interface SendBubbleOpts {
   record?: boolean;               // append the joined text to history (default true)
   paced?: boolean;                // simulate typing between bubbles (default true). false = send now (critical alerts)
   mayShow?: () => boolean;        // asked right before each bubble goes out; false drops it and the rest (state/liveTurn.ts)
+  verbatim?: boolean;             // code-written text shown exactly as written: only the routing-tag backstop runs (state/mouth.ts)
 }
 
 // Simulated typing time for a bubble — pure math in state/pacing.ts (floor/cap/jitter, plus the
@@ -610,7 +611,7 @@ async function sendBubbles(chatId: string, rawBubbles: string[], opts: SendBubbl
   // reply target; without it we fall back to replyToFirst.
   const prepared: { text: string; replyTo?: ReplyTo }[] = [];
   for (let i = 0; i < rawBubbles.length; i++) {
-    const text = prepareBubble(rawBubbles[i]);
+    const text = opts.verbatim ? stripReplyTag(rawBubbles[i]) : prepareBubble(rawBubbles[i]);
     if (!text) continue;
     const replyTo = opts.targets?.[i] ?? (i === 0 ? opts.replyToFirst : undefined);
     prepared.push({ text, replyTo });
@@ -1032,10 +1033,12 @@ async function processMessage(agentClient: AgentClient, chatId: string, from: st
     bubbleReport = noteBubbleReport(chatId, buildBubbleReport(shipped, { hardCapped: hardCapped === true, splits: split.splits }));
 
     // If we're delegating, thread the LATE Ops follow-up to the message that actually asked, not the
-    // last burst message (which may be a "thanks"). Prefer the message a holding bubble quoted; else,
-    // in a burst, default to the FIRST message (the substantive ask usually leads).
+    // last burst message (which may be a "thanks"). Prefer the text her holding beat quoted (lookRe),
+    // then any quote in the reply; else, in a burst, default to the FIRST message (the substantive ask
+    // usually leads).
     if (delegatedTask) {
-      const quoted = targets.find(t => t?.message_id)?.message_id;
+      const look = delegatedTask.lookRe != null ? incomingMessageIds[delegatedTask.lookRe - 1] : undefined;
+      const quoted = look ?? targets.find(t => t?.message_id)?.message_id;
       if (quoted) delegatedTask.replyToMessageId = quoted;
       else if (isBurst && incomingMessageIds.length) delegatedTask.replyToMessageId = incomingMessageIds[0];
     }

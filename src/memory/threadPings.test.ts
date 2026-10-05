@@ -14,12 +14,13 @@ import {
   type ThreadPingMessage,
 } from './threadPings.js';
 import { groupHandle } from './identity.js';
-import { resetStorageForTests } from '../db/sqlite.js';
+import { resetStorageForTests, stmt } from '../db/sqlite.js';
 import { getThreadInventory, saveThreadInventory } from '../db/repositories/threadInventory.js';
 import { bumpForgetEpoch, setPreference } from '../db/repositories/memory.js';
 import { defaultThreadInventory, type OpenLoop, type ThreadInventory } from '../persona/threads.js';
 import { getTraces, clearTraces } from '../diagnostics/trace.js';
 import type { TraceEvent } from '../diagnostics/trace.js';
+import { CHECKIN_PAYLOAD } from '../agents/proactive.js';
 
 const T0 = Date.UTC(2026, 3, 1);
 const DAY = 24 * 60 * 60 * 1000;
@@ -162,7 +163,7 @@ test('the receipt buckets are disjoint — every considered handle has exactly o
   const d = detail(trace('threads:ping')) as unknown as Record<string, number>;
   assert.equal(d.considered, 6);
   const accounted = d.sent + d.failed + d.skipped_group + d.skipped_budget
-    + d.skipped_quiet + d.no_candidate + d.no_chat + d.save_refused;
+    + d.skipped_quiet + d.no_candidate + d.no_chat + d.save_refused + d.skipped_backoff + d.checkins;
   assert.equal(accounted, d.considered, 'nothing vanished without a reason');
   assert.equal(d.sent, 1);
   assert.equal(d.no_candidate, 1);
@@ -363,4 +364,47 @@ test('two sweeps cannot overlap', async () => {
 
   assert.equal(overlapped, false);
   assert.equal(getTraces().filter(e => e.label === 'threads:ping').length, 1, 'the second run saw the guard');
+});
+
+// ── The back-off (memory/proactiveBackoff.ts) ────────────────────────────────
+
+function deliveredTo(chatId: string, kind: string, at: number): void {
+  stmt(
+    `INSERT INTO proactive_deliveries (id, chat_id, kind, text, meta_json, dedupe_key, status, deliver_after, created_at, delivered_at)
+     VALUES (?, ?, ?, 'x', '{}', ?, 'delivered', NULL, ?, ?)`
+  ).run(`${kind}-${at}`, chatId, kind, `k-${kind}-${at}`, at, at);
+}
+
+test('three unanswered texts of hers turn the next slot into one check-in, with no loop needed', async () => {
+  await seed(H, { loops: [] }, CHAT);                 // nothing to ask about: the check-in still goes
+  deliveredTo(CHAT, 'callback', 1); deliveredTo(CHAT, 'musing', 2); deliveredTo(CHAT, 'callback', 3);
+  const s = spy();
+  await runThreadPingSweep(s, { now: T0 });
+
+  assert.equal(s.calls.length, 1);
+  assert.equal(s.calls[0].kind, 'checkin');
+  assert.equal(s.calls[0].text, CHECKIN_PAYLOAD, 'the local copy of the payload matches the voicer');
+  assert.equal(s.calls[0].dedupeKey, 'backoff:checkin:+15551230009:2026-W14');
+  const inv = await getThreadInventory(H);
+  assert.equal(inv.lastPingAt, T0, 'the week is spent');
+  assert.equal(inv.pending, null, 'no loop is left awaiting an answer');
+  assert.equal(detail(trace('threads:ping')).checkins, 1);
+});
+
+test('an unanswered check-in keeps the sweep silent, even with a ripe loop', async () => {
+  await seed(H, { loops: [loop()] }, CHAT);
+  deliveredTo(CHAT, 'checkin', 1);
+  const s = spy();
+  await runThreadPingSweep(s, { now: T0 });
+  assert.equal(s.calls.length, 0);
+  assert.equal(detail(trace('threads:ping')).skipped_backoff, 1);
+  assert.equal((await getThreadInventory(H)).lastPingAt, 0, 'nothing billed');
+});
+
+test('two unanswered is still the usual ping', async () => {
+  await seed(H, { loops: [loop()] }, CHAT);
+  deliveredTo(CHAT, 'callback', 1); deliveredTo(CHAT, 'musing', 2);
+  const s = spy();
+  await runThreadPingSweep(s, { now: T0 });
+  assert.equal(s.calls[0].kind, 'callback');
 });

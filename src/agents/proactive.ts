@@ -1,20 +1,22 @@
 // The voice of a message NO ONE ASKED FOR. Everything else Irises says is a reply — a live turn, a
-// late Ops follow-up, a progress beat. These seven kinds start the thread themselves: a reminder the
+// late Ops follow-up, a progress beat. These eight kinds start the thread themselves: a reminder the
 // user set coming due, mail they asked to be watched for, a background finding, an update note, a
-// callback on a thread they left hanging — alone among them, carrying nothing to hand over — once
-// per install the first text of all, sent before a thread between them exists, and a musing: a
-// thought of her own, which nobody set up and nothing came due for (memory/musings.ts).
+// callback on a thread they left hanging — carrying nothing to hand over — once per install the
+// first text of all, sent before a thread between them exists, a musing: a thought of her own, which
+// nobody set up and nothing came due for (memory/musings.ts), and a check-in: the back-off's one ask
+// whether they still want her texting first, after her own texts went unanswered
+// (memory/proactiveBackoff.ts).
 //
 // Same Composer persona and the same assembly as the reactive path (composerCore.ts), plus one thing
 // a reply never needs: an ORIENTATION beat. A text arriving out of nowhere has to say why it's
 // arriving in its first bubble, grounded in what the user themselves set up — "you asked me friday
-// to flag this" — never announcement-shaped and never "my system fired". The introduction is the one
-// kind that skips it: nothing was set up, so there is nothing to place.
+// to flag this" — never announcement-shaped and never "my system fired". Two kinds skip it, the
+// introduction and the check-in: nothing was set up, so there is nothing to place.
 //
 // Fidelity is stricter here than anywhere: the payload is the ONLY fact source. The thread above is
 // register and continuity, nothing more. On conflict the payload wins, silently. The one standing
 // thread this module reads for itself (readContinuity, below) lives under the same rule and one
-// tighter: it is offered to three of the six kinds only, and never to the user's own setups.
+// tighter: it is offered to three of the eight kinds only, and never to the user's own setups.
 
 import { composeWithComposer } from './composerCore.js';
 import { voiceOutcome } from './fallfirm/client.js';
@@ -26,7 +28,10 @@ import { listRecentReminders, PROACTIVE_REMINDER_MAX_AGE_MS } from '../db/reposi
 import { timestampLabel } from '../pipeline/chatTime.js';
 
 // `proactive_deliveries.kind` is a bare TEXT column with no CHECK, so a new kind needs no migration.
-export type ProactiveKind = 'reminder' | 'email' | 'memo' | 'update' | 'callback' | 'introduction' | 'musing';
+export type ProactiveKind = 'reminder' | 'email' | 'memo' | 'update' | 'callback' | 'introduction' | 'musing' | 'checkin';
+
+/** The check-in's payload (memory/threadPings.ts sends it when the back-off asks). */
+export const CHECKIN_PAYLOAD = 'whether they still want you texting them first';
 
 export interface ProactivePayload {
   kind: ProactiveKind;
@@ -54,20 +59,23 @@ const COMPOSER_FRAMING: Record<ProactiveKind, string> = {
   email: 'something just landed in their email that they asked you to watch for — say in your first beat that it just came in, then surface what matters, brief and useful',
   memo: 'you have something for them from work you were doing in the background on their behalf — one beat placing it, then hand it over naturally',
   update: 'you have a light note about yourself to pass on — one beat placing why it is coming now, then the note, casual and once, never announcement-shaped',
-  // The one kind with nothing in hand. Every other framing above hands something OVER; this one asks,
-  // and so it is the only place the "never open with a question" rule bends — the question still
-  // comes last, after the beat that places the thing.
-  callback: "you're circling back on something you two keep coming back to — nothing new in hand, no result, no reminder due, just you asking how it went. one short beat placing the thing first, grounded and in their word for it, never question-shaped — then the question itself, once, flat, and it ends your message. this is the only proactive that carries a question at all, and it is a callback: the one hook this text carries. you hold no outcome: nothing guessed, nothing assumed — you don't know how it went; that is exactly why you're asking.",
-  // The only kind with no orientation beat, because there is nothing to orient them to: no setup of
-  // theirs came due, no thread runs above it. She was installed minutes ago and speaks first.
+  // A kind with nothing in hand. The framings above hand something OVER; this one asks (the check-in
+  // below is the other), and so the "never open with a question" rule bends here — the question
+  // still comes last, after the beat that places the thing.
+  callback: "you're circling back on something you two keep coming back to — nothing new in hand, no result, no reminder due, just you asking how it went. one short beat placing the thing first, grounded and in their word for it, never question-shaped — then the question itself, once, flat, and it ends your message. only two proactives carry a question at all, this and the check-in on whether they still want you texting first, and here it is a callback: the one hook this text carries. you hold no outcome: nothing guessed, nothing assumed — you don't know how it went; that is exactly why you're asking.",
+  // No orientation beat (the check-in is the other kind without one), because there is nothing to
+  // orient them to: no setup of theirs came due, no thread runs above it. She was installed minutes
+  // ago and speaks first.
   introduction: "you're texting them first, ever — you were just set up on their phone and they haven't said a word to you. no orientation beat: nothing was set up, there's nothing to place. open as yourself — you're Irises, and they can call you Iris or Ilish or Lish, your words, never a form. then, if the lines below carry details: pick TWO at most, make ONE flat judgment out of them — a dry, checkable read on how they operate, stated, deniable, never a compliment and never a question mark doing the work — and stop. if the lines below are empty you're newly acquainted, never blank: one bold deniable read about how they probably operate instead. hard rules: nothing sensitive, never their name even if you hold it, never 'i was told' or anything that smells like a file was read — you just moved in, you noticed things. 1-2 short bubbles after the intro line, then you're done.",
   // The one kind nobody set up and nothing came due for: something is on HER mind (memory/musings.ts).
   // The payload is a seed to grow a thought from, never a fact to hand over, which is why the
   // instruction below labels it as a seed instead of as what she is delivering.
   musing: "no one texted you and nothing of theirs came due: this one starts with you, because something is on your mind. the line below is a seed, a thing you hold, or a thing you keep about them, or a thread of theirs, and what you send is a thought grown from it: a take, a thing you keep turning over, something that connects to them. the seed itself stays unread; they only ever see the thought. one or two short bubbles, and end somewhere they can jump in; a question may end it, or a statement with room after it. never a service offer, never a check-in, and never announce that they were on your mind, the thought itself is the proof. never a reminder, and nothing sensitive: if the seed touches their body, health, family, or anything they did not choose, leave it and send nothing.",
+  // The back-off's one ask (memory/proactiveBackoff.ts).
+  checkin: "no one texted you, and the last few texts you started went unanswered. this one asks them, once, whether they still want you starting conversations at all. no orientation beat: nothing of theirs came due, so there is nothing to place. one short beat of your own if you want one, then the question, flat, and it ends your message. keep no score: no count, no recap of what went unanswered, no guilt, no pleading, no promise about what happens next, and no hurt in it. their answer, or no answer, settles it.",
 };
 
-/** The Fallfirm framings for the same six moments — the degrade path when the Composer's own
+/** The Fallfirm framings for the same eight kinds — the degrade path when the Composer's own
  *  ladder is spent. Substance rides `facts` (relayed exactly); this is only the framing. */
 const FALLFIRM_FRAMING: Record<ProactiveKind, string> = {
   reminder: 'a reminder they set with you is due — deliver it now, flat and brief, like you remembered on your own',
@@ -80,6 +88,7 @@ const FALLFIRM_FRAMING: Record<ProactiveKind, string> = {
   // Fallfirm path relays its payload as facts and a seed read out verbatim is the one thing a musing
   // must never be. Present because the map is total over the kinds.
   musing: 'something of yours is on your mind: one short thought of your own, and stop',
+  checkin: 'ask once whether they still want you texting first: one flat line, no guilt, and stop',
 };
 
 /** The Outcome Fallfirm voices when the Composer could not. `framing` from the caller (the update

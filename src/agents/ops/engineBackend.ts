@@ -26,6 +26,19 @@ import type { OpsTask, OpsResult, OpsDebrief, OpsFailureCause } from '../types.j
  *  one, and every control built on it degrades to "we can only drop it locally". */
 export type EngineRunHandle = { engine: 'hermes' | 'openclaw'; runId: string };
 
+/** How long a run may sit waiting on the user's answer to an engine's dangerous-command ask:
+ *  hermes's own `approvals.timeout` default (300s, after which IT refuses the command) plus a
+ *  margin, so our give-up never lands before the engine's own answer does. */
+export const ENGINE_APPROVAL_WAIT_MS = 315_000;
+
+/** One dangerous command the engine paused on mid-run, waiting for the user (hermes's
+ *  `approval.request`). The command arrives already redacted by the engine. */
+export interface EngineApprovalRequest {
+  handle: EngineRunHandle;
+  command: string;
+  description: string;
+}
+
 /** Milestone/abort plumbing threaded from the orchestrator through runTask into the adapter. */
 export interface EngineRunContext {
   onProgress?: (milestoneKey: string) => void;
@@ -49,6 +62,15 @@ export interface EngineRunContext {
    *  Reported on the terminal event so the caller can replay it as its own leg instead of losing
    *  what the user asked for (hermes calls this `pending_steer`). */
   onPendingSteer?: (text: string) => void;
+  /** The engine paused this run on a dangerous command and is waiting for the user's answer.
+   *  Synchronous and best-effort, like `onRunHandle`: the adapter guards the call. Present means the
+   *  caller relays the ask (OPS_ENGINE_APPROVAL_RELAY), so the adapter also holds its give-up for the
+   *  wait; absent means the frame is ignored, exactly as before the relay existed. */
+  onApprovalRequest?: (req: EngineApprovalRequest) => void;
+  /** The wait `onApprovalRequest` opened is over: 'answered' when the engine confirmed an answer,
+   *  'expired' when the run moved on without one (its own window closed, the run ended, or our view
+   *  of it was lost). Exactly once per request. Same synchronous, best-effort contract. */
+  onApprovalSettled?: (handle: EngineRunHandle, how: 'answered' | 'expired') => void;
 }
 
 /** A reminder/automation living ON THE ENGINE (its cron owns scheduling; Irises holds no rows). */
@@ -196,6 +218,11 @@ export interface EngineBackend {
    * caller says so honestly rather than pretending the addition was delivered.
    */
   steerRun?(handle: EngineRunHandle, text: string, opts?: { signal?: AbortSignal }): Promise<'accepted' | 'not_running'>;
+  /** Answer a dangerous-command ask the run is waiting on (see `onApprovalRequest`). 'once' lets that
+   *  ONE command run; 'not_pending' is a run no longer waiting (its own timeout refused it, or it
+   *  ended); 'failed' is a transport error. Never throws. Optional: an engine without mid-run
+   *  approvals has no method. */
+  resolveRunApproval?(handle: EngineRunHandle, choice: 'once' | 'deny'): Promise<'resolved' | 'not_pending' | 'failed'>;
   createReminder(spec: ReminderSpec): Promise<ReminderRef>;
   /** `timeoutMs` overrides the adapter's own default request budget — optional, same DI convention
    *  as `EngineRunContext.timeoutMs`; a caller that doesn't pass it gets the adapter's standard
@@ -405,6 +432,16 @@ export function browserLegBudgetMs(env: NodeJS.ProcessEnv): number | null {
  *  locally and the engine is never told. */
 export function opsCancelEngineAbortEnabled(): boolean {
   const v = (process.env.OPS_CANCEL_ENGINE_ABORT || '').trim().toLowerCase();
+  if (v === '') return true;
+  return ['true', '1', 'on', 'yes'].includes(v);
+}
+
+/** The engine approval relay (env: OPS_ENGINE_APPROVAL_RELAY, docs/CONFIGURATION.md). Default ON,
+ *  read at CALL time, the same parse shape as opsCancelEngineAbortEnabled. Off is the behaviour
+ *  before the relay: the orchestrator hooks nothing, so an `approval.request` is ignored, no clock
+ *  moves, no marker is written, and no reply is read as an answer to one. */
+export function engineApprovalRelayEnabled(): boolean {
+  const v = (process.env.OPS_ENGINE_APPROVAL_RELAY || '').trim().toLowerCase();
   if (v === '') return true;
   return ['true', '1', 'on', 'yes'].includes(v);
 }

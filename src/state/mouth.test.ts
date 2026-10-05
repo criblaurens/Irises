@@ -5,15 +5,16 @@ import assert from 'node:assert/strict';
 import { createMouth } from './mouth.js';
 import { __resetSendQueues, withChatLock } from './sendQueue.js';
 import { DeadlineError } from '../agents/deadline.js';
+import { splitIntoBubbles } from '../pipeline/bubbles.js';
 
 const wait = (ms: number) => new Promise<void>(res => setTimeout(res, ms));
 
-interface SentCall { chatId: string; bubbles: string[]; opts: { record?: boolean; paced?: boolean } }
+interface SentCall { chatId: string; bubbles: string[]; opts: { record?: boolean; paced?: boolean; verbatim?: boolean } }
 
 function makeDeps(overrides: { lastSpokenAt?: (chatId: string) => number | undefined; voiceTimeoutMs?: number } = {}) {
   const sent: SentCall[] = [];
   const deps = {
-    sendBubbles: async (chatId: string, bubbles: string[], opts: { record?: boolean; paced?: boolean }) => {
+    sendBubbles: async (chatId: string, bubbles: string[], opts: { record?: boolean; paced?: boolean; verbatim?: boolean }) => {
       sent.push({ chatId, bubbles, opts });
     },
     splitIntoBubbles: (text: string) => text.split('\n---\n').map(s => s.trim()).filter(Boolean),
@@ -185,4 +186,19 @@ test('the typing wrapper is released when the voicer hits the deadline (dots nev
   } finally {
     clearTimeout(keepAlive);
   }
+});
+
+test('a verbatim send splits only at newlines, every line goes out as written, and the transport guards still hold', async () => {
+  __resetSendQueues();
+  const { deps, sent } = makeDeps();
+  // The real reply splitter: a send that ignored verbatim would come out with each command rewritten.
+  const speak = createMouth({ ...deps, splitIntoBubbles });
+  const commands = ['rm -rf *.tmp *.log', 'rm -rf _old_ _tmp_', 'python -c "a  =  1"', 'git log -- src --- x — done. ok?'];
+  const text = ['your hermes wants to run this', ...commands, 'you ok with that?'].join('\n');
+  assert.equal(await speak('c', text, { paced: false, record: false, verbatim: true, dropIf: () => true }), 'dropped', 'dropIf still binds');
+  assert.equal(await speak('c', text, { paced: false, record: false, verbatim: true }), 'sent');
+  assert.deepEqual(sent[0].bubbles, ['your hermes wants to run this', ...commands, 'you ok with that?']);
+  assert.equal(sent[0].opts.verbatim, true, 'the send path is told, so no text cleanup runs over the lines');
+  assert.equal(sent[0].opts.paced, false);
+  assert.equal(sent[0].opts.record, false);
 });

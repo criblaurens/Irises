@@ -23,18 +23,39 @@ export function looksLikeMiss(text: string | null | undefined): boolean {
   return !t || t.startsWith('no result') || t.startsWith('answer: no result');
 }
 
+/** The contract's NEXT label, upper case as the contract writes it, at a line start. */
+const NEXT_LINE = /^\s*NEXT\s*:/;
+
+/** The engine's NEXT line, lifted off its answer: the step it could take next, and the answer
+ *  without it, so the composer never relays the engine's own suggestion raw. The contract puts NEXT
+ *  after everything the run found, so the LAST such line is the step: an earlier one is a line quoted
+ *  from what it read. Every NEXT line comes off the answer. "none" is no step. Text with no NEXT
+ *  line comes back as it was. PURE; exported for unit tests. */
+export function splitNextLine(text: string): { summary: string; next?: string } {
+  const lines = text.split('\n');
+  const nextLines = lines.filter(l => NEXT_LINE.test(l));
+  if (!nextLines.length) return { summary: text };
+  const step = nextLines[nextLines.length - 1].replace(NEXT_LINE, '').trim();
+  const summary = lines.filter(l => !NEXT_LINE.test(l)).join('\n').trim();
+  return step && !/^none\.?$/i.test(step) ? { summary, next: step } : { summary };
+}
+
 // The output contract the engine must follow so everything downstream (classifyResult's miss
 // detection, the composer's fidelity relay) keeps working regardless of which engine ran. The
 // ANSWER/SOURCE/FLAGS shape is the same one the old native loop produced.
 // NOTICED (2026-10-04) is the material the composer's view of a finding is made of — what a person
 // sees on the way (is this number high, what changed, the catch). It sits right under ANSWER so the
 // two read together; classifyResult keys on the ANSWER/NO RESULT prefix and never sees it.
+// NEXT (2026-10-04) is the one step toward what they want that this run did not take, stated by the
+// engine; runTask lifts it off the answer into `OpsResult.next` (splitNextLine), and whether to offer
+// it is hers (ops/followUp.ts).
 const OUTPUT_CONTRACT = [
   'Reply with the final answer only — no preamble, no planning, no questions back. Format:',
   'ANSWER: <the concrete answer — every figure, date, name and address exactly as found>',
   'NOTICED: <what stood out to you while finding it, the context that gives the answer its meaning: how it compares with what is usual, what is unusual or changing, the catch, the reason behind it. Only what you already saw on the way, never an extra lookup for it; every figure in it exact. "none" when nothing stood out>',
   'SOURCE: <where each hard fact came from (a page, a message, a file)>',
   'ACTIONS: <only when you DID something beyond reading — code run over what data, an artifact produced, a follow-up you scheduled and its fire time; required whenever the brief listed required actions, one report per item including any you could not do. Omit this line entirely when there is nothing to report.>',
+  'NEXT: <the one concrete step toward what they want that this run did not take, only when one is plainly worth taking; omit the line otherwise. A statement of the step, never a question or an offer.>',
   'FLAGS: <caveats or uncertainty, or "none">',
   'If you found nothing usable, the ANSWER line must start with exactly "NO RESULT:" followed by one honest sentence about what you tried.',
 ].join('\n');
@@ -174,8 +195,9 @@ export function legBudgetFor(task: OpsTask, env: NodeJS.ProcessEnv = process.env
 /** Execute one delegated task end to end on the configured engine.
  *  @param onProgress optional milestone SIGNAL. The caller (orchestrator) owns throttle + voicing.
  *  @param sink receives the (partial) debrief immediately, so an abandoned run leaves a trail.
- *  @param seedCorpus prior findings (e.g. a first pass's output on a retry) folded into the prompt. */
-export async function runTask(task: OpsTask, onProgress?: (milestoneKey: string) => void, signal?: AbortSignal, sink?: OpsDebriefSink, seedCorpus?: string[]): Promise<OpsResult> {
+ *  @param seedCorpus prior findings (e.g. a first pass's output on a retry) folded into the prompt.
+ *  @param approval the engine paused on a dangerous command, and that wait ended; the orchestrator relays both (ops/engineApproval.ts). Absent: the ask is ignored, as before the relay. */
+export async function runTask(task: OpsTask, onProgress?: (milestoneKey: string) => void, signal?: AbortSignal, sink?: OpsDebriefSink, seedCorpus?: string[], approval?: Pick<EngineRunContext, 'onApprovalRequest' | 'onApprovalSettled'>): Promise<OpsResult> {
   const tracePrefix = task.retryOf ? 'ops-retry' : 'ops';
   const debrief: OpsDebrief = { steps: 0, toolsRun: [], corpus: [], startedAt: Date.now(), endedAt: 0 };
   if (sink) sink.debrief = debrief;
@@ -240,7 +262,13 @@ export async function runTask(task: OpsTask, onProgress?: (milestoneKey: string)
   // an ordinary leg passes none at all, so the adapters keep their module-wide window untouched.
   const ctx: EngineRunContext = {
     onProgress, signal,
+    ...approval,
     ...(browserBudget ? { timeoutMs: computeEngineTimeoutMs(process.env, browserBudget) } : {}),
   };
-  return done(await runViaEngine(engine, prompt, task, ctx, debrief));
+  const r = await runViaEngine(engine, prompt, task, ctx, debrief);
+  if (r.status !== 'ok') return done(r);
+  // The step the engine says could come next comes off the answer here, so nothing downstream (the
+  // composer, the stashed research) ever carries it as part of what was found.
+  const { summary, next } = splitNextLine(r.summary);
+  return done({ ...r, summary, ...(next ? { next } : {}) });
 }

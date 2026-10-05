@@ -819,13 +819,13 @@ const FIXTURES: Fixture[] = [
         hits: [{ label: 'the lease pdf they just sent', source: 'research' }],
       },
       craft: craftFacts(MEDIA_DATA, `the lease pdf, can you read it ${MEDIA_NOTE}`),
-      liveState: { reminders: WIDE_REMINDERS, holdingBeats: FULL_BEATS, unsendBubbles: WIDEST_UNSEND },
+      liveState: { reminders: WIDE_REMINDERS, holdingBeats: FULL_BEATS, unsendBubbles: WIDEST_UNSEND, checkinAwaiting: true },
     },
     memoryStack: MEDIA_STACK,
     sections: [
       'persona', 'tool_docs', 'capability', 'model_map', 'craft_modules', 'update_status',
       'context_block', 'active_ops', 'recent_beats', 'live_reminders', 'current_time', 'weather', 'status_contract',
-      'conversation_timing', 'reply_order', 'unsend', 'turn_focus', 'behavior_anchor', 'json_anchor',
+      'conversation_timing', 'reply_order', 'unsend', 'checkin', 'turn_focus', 'behavior_anchor', 'json_anchor',
     ],
   },
   {

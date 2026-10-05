@@ -38,7 +38,10 @@
 | `HERMES_RUN_TRANSPORT` | `runs` (default) \| `chat` — which transport a hermes delegation speaks. `runs` = `POST /v1/runs` + SSE events, the one that lets stop and `steer_research` reach an in-flight leg; `chat` = the old blocking `/v1/chat/completions` body, no run control. Falls back to `chat` on its own for an image-bearing task or a hermes with no runs API. |
 | `OPS_CANCEL_ENGINE_ABORT` | On give-up (user says stop, or Irises's own leg timeout) also tell the engine to stop working — hermes `POST /v1/runs/{id}/stop`, OpenClaw's abort RPC. `off` reverts to dropping the connection locally (the orphaned-run bug this exists to fix). Both engines. Default on. |
 | `OPS_APPROVAL_GATE` | Park a delegation that would act in the world until the user says yes in that chat. `off` = kick it off immediately, no question, no parked row. Default on. |
+| `OPS_ENGINE_APPROVAL_RELAY` | Relay hermes's mid-run dangerous-command asks (`approval.request` on `/v1/runs`) to the person whose look it is: one message carrying the command exactly as hermes reported it, and their next reply posted back to that run as `once` (yes) or `deny` (no). While it waits, the look's deadline stretches by hermes's own approval window plus a margin (315s), and a yes that lands after hermes stopped waiting re-runs just that step. A command longer than 1000 characters is never relayed: hermes's own timeout refuses it. `off` = the ask is ignored as before: nothing is sent, no clock moves, and hermes's own timeout refuses the command. hermes only. Default on. |
 | `HERMES_BRIDGE_URL` · `IRISES_PUSH_URL` | Where Irises sends bridge replies (default `http://127.0.0.1:8655`) and the push URL embedded in engine cron jobs. |
+
+**Engine asks in bridge mode.** Under `IRISES_FRONT=*:*` (the hermes install default, see INSTALL.md) Irises fronts chats that are not yours, and a look one of them starts runs on your machine like any other. The relay sends that look's dangerous-command ask to the chat that started it, so whoever is in that chat can answer it. If anyone but you can reach Irises through a fronted chat, set `OPS_ENGINE_APPROVAL_RELAY=off`: every such ask is then left to hermes, whose own timeout refuses it.
 
 **Channels**
 
@@ -97,6 +100,8 @@
 | `IRISES_MUSINGS_ENABLED` | Lets her text first about something on her own mind, apart from anything the user set up. Bounds: one a day at most, only at hours (in their timezone) when that person usually texts, learned from their last two weeks (10:00–21:00 until there is enough history), only after recent contact and a quiet chat, never a room. Default on. |
 | `THREADING_PINGS_ENABLED` | Lets her *start* a message about a loop left hanging. **Default on** (`configure.sh --pings on\|off`); hard bounds — one ping per person per week, 48h of silence first, never a group, never twice about the same thing. |
 | `FIRST_MOVE_ENABLED` | The one-time install introduction described above. Default on. |
+
+**Backing off when her texts go unanswered** — no setting needed. After three of her own texts (thread pings, musings) go unanswered, she asks once whether they still want her texting first. If that ask goes unanswered she stays silent until they text. A "no" saves the per-person preference `texts_first=false`, and they can tell her in chat to start again. Reminders, mail and memos they set up are never affected.
 
 `.env.example` is the annotated local template; `deploy/app.env` carries the shared baseline.
 
