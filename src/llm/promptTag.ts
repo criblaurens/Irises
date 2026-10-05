@@ -37,6 +37,9 @@ const PAYLOAD_TAGS = [
   // Reminder titles and texts (convo/liveReminders.ts), and the results a turn's calls came back with
   // (convo/actionResults.ts renderActionResultsPass), both of which carry words somebody else wrote.
   'live_reminders', 'action_results',
+  // A follow-up step's brief (ops/followUp.ts): the answer the last run came back with, which can
+  // quote the pages it read, and the step that run named.
+  'previous_answer', 'named_step',
 ];
 const TAG_BREAKOUT_RE = new RegExp(`<(/?)(?:${PAYLOAD_TAGS.join('|')})\\b`, 'gi');
 
