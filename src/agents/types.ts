@@ -177,6 +177,10 @@ export interface OpsResult {
    *  yet — the orchestrator replays it once as a refinement leg rather than delivering an answer
    *  that quietly ignores the last thing they said. */
   steerUnapplied?: string;
+  /** The engine's NEXT line (ops/client.ts OUTPUT_CONTRACT): one step toward what they want that this
+   *  run did not take, lifted off `summary`. Whether to offer it is hers (ops/followUp.ts). ABSENT
+   *  when the engine named none. */
+  next?: string;
 }
 
 /**
