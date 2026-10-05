@@ -55,6 +55,10 @@ interface InFlightEntry {
   // The subset not yet handed to a caller for delivery. A steer that arrives before engineRun
   // exists (hermes takes a second or two to build the agent) waits here rather than being dropped.
   pendingSteers?: string[];
+  // Time this leg spent waiting on the user's answer to an engine's dangerous-command ask
+  // (ops/engineApproval.ts). The leg is alive through it, so every "still in flight" reading adds it
+  // back. Reset with each new leg (markOpsRetry).
+  graceMs?: number;
 }
 
 /**
@@ -208,6 +212,7 @@ export function markOpsRetry(chatId: string, taskId: string): void {
   const entry = inFlight.get(chatId)?.get(taskId);
   if (!entry || entry.cancelled) return;
   entry.startedAt = Date.now();
+  delete entry.graceMs;
   if (taskSink) {
     try { taskSink.onRetry({ chatId, taskId }); }
     catch { /* durable state is best-effort */ }
@@ -224,7 +229,7 @@ export function markOpsRetry(chatId: string, taskId: string): void {
 export function getOpsEtaStatus(chatId: string, taskId: string, now: number = Date.now()): EtaStatus | undefined {
   const entry = inFlight.get(chatId)?.get(taskId);
   if (!entry || entry.cancelled) return undefined;
-  if (now - entry.startedAt >= opsStaleMs()) return undefined;
+  if (now - entry.startedAt - (entry.graceMs ?? 0) >= opsStaleMs()) return undefined;
   if (entry.estimateMs == null) return undefined;
   const elapsed = now - entry.firstStartedAt;
   return etaStatus({ bucketMs: entry.estimateMs, phrase: entry.estimatePhrase ?? '' }, elapsed);
@@ -245,6 +250,13 @@ export function noteOpsProgress(chatId: string, taskId: string, milestoneKey: st
     entry.lastMilestone = milestoneKey;
     entry.milestoneAt = Date.now();
   }
+}
+
+/** Push this leg's in-flight horizon out by `ms`: the engine is idle waiting on the user's answer to
+ *  a dangerous-command ask, and the run must keep reading as in flight until that wait is up. */
+export function extendOpsLeg(chatId: string, taskId: string, ms: number): void {
+  const entry = inFlight.get(chatId)?.get(taskId);
+  if (entry && !entry.cancelled) entry.graceMs = (entry.graceMs ?? 0) + ms;
 }
 
 /**
@@ -462,7 +474,7 @@ export function getActiveOps(chatId: string, now: number = Date.now()): ActiveOp
   if (!byTask) return [];
   const staleMs = opsStaleMs();
   return [...byTask.entries()]
-    .filter(([, e]) => now - e.startedAt < staleMs && !e.cancelled)
+    .filter(([, e]) => now - e.startedAt - (e.graceMs ?? 0) < staleMs && !e.cancelled)
     .map(([taskId, e]) => ({ taskId, kind: e.kind, request: e.request, startedAt: e.startedAt, firstStartedAt: e.firstStartedAt, origin: e.origin, lastMilestone: e.lastMilestone, milestoneAt: e.milestoneAt, estimateMs: e.estimateMs, estimatePhrase: e.estimatePhrase, ...(e.steerLog?.length ? { steers: e.steerLog.map(s => s.text), steerLog: e.steerLog.map(s => ({ ...s })) } : {}), ...(e.engineActions?.length ? { engineActions: [...e.engineActions] } : {}) }));
 }
 
@@ -538,7 +550,7 @@ export function hasInFlightRequest(chatId: string, request: string, now: number 
   const staleMs = opsStaleMs();
   const norm = request.trim().toLowerCase().replace(/\s+/g, ' ');
   for (const e of byTask.values()) {
-    if (now - e.startedAt < staleMs && !e.cancelled && e.request.trim().toLowerCase().replace(/\s+/g, ' ') === norm) return true;
+    if (now - e.startedAt - (e.graceMs ?? 0) < staleMs && !e.cancelled && e.request.trim().toLowerCase().replace(/\s+/g, ' ') === norm) return true;
   }
   return false;
 }
@@ -557,7 +569,7 @@ export function isDuplicateDelegation(chatId: string, kind: string, request: str
   if (byTask) {
     for (const e of byTask.values()) {
       // A cancelled run doesn't block a re-ask — "actually, run it again" must start fresh.
-      if (e.normKey === key && now - e.startedAt < staleMs && !e.cancelled) return 'in_flight';
+      if (e.normKey === key && now - e.startedAt - (e.graceMs ?? 0) < staleMs && !e.cancelled) return 'in_flight';
     }
   }
   const at = recentlyDelegated.get(chatId)?.get(key);

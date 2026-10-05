@@ -8,9 +8,9 @@ import {
   normalizeRequest, __resetOpsCoordination, markOpsRetry, getOpsEtaStatus,
   opsStaleMs, OPS_STALE_SLACK_MS,
   noteOpsEngineRun, getOpsEngineRun, requestOpsSteer, takePendingSteers,
-  beginOpsEngineLeg, endOpsEngineLeg, noteOpsSteerUnreachable,
+  beginOpsEngineLeg, endOpsEngineLeg, noteOpsSteerUnreachable, extendOpsLeg,
 } from './opsCoordination.js';
-import { BROWSER_LEG_BUDGET_MS } from '../agents/ops/engineBackend.js';
+import { BROWSER_LEG_BUDGET_MS, ENGINE_APPROVAL_WAIT_MS } from '../agents/ops/engineBackend.js';
 
 test('markOpsStart is visible to a synchronous getActiveOps in the same tick (no async race)', () => {
   __resetOpsCoordination();
@@ -452,4 +452,16 @@ test('getActiveOps: an untouched run carries no steers field at all', () => {
   // Absent, not empty: the status line and its prompt budget are the same bytes as before anyone
   // could add to a running ask.
   assert.equal('steers' in getActiveOps('chatA')[0], false);
+});
+
+test('an engine ask stretches the in-flight horizon by its wait, and a new leg starts with none', () => {
+  __resetOpsCoordination();
+  markOpsStart('c-grace', 't-grace', { kind: 'general', request: 'clear the scratch folder' });
+  const past = Date.now() + opsStaleMs() + 1_000;
+  assert.equal(getActiveOps('c-grace', past).length, 0, 'past the horizon it reads as stale');
+  extendOpsLeg('c-grace', 't-grace', ENGINE_APPROVAL_WAIT_MS);
+  assert.equal(getActiveOps('c-grace', past).length, 1);
+  assert.equal(isDuplicateDelegation('c-grace', 'general', 'clear the scratch folder', past), 'in_flight');
+  markOpsRetry('c-grace', 't-grace');
+  assert.equal(getActiveOps('c-grace', Date.now() + opsStaleMs() + 1_000).length, 0, 'the retry leg carries no grace');
 });

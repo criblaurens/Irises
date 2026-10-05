@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { withDeadline, DeadlineError } from './deadline.js';
+import { withDeadline, DeadlineError, type DeadlineExtender } from './deadline.js';
 
 test('withDeadline: resolves when work settles within deadline', async () => {
   const result = await withDeadline(Promise.resolve('ok'), 1000, 'test fast work');
@@ -51,4 +51,12 @@ test('withDeadline: delays exceeding 32-bit signed int (> 24.8 days) do not over
   } finally {
     process.removeListener('warning', onWarning);
   }
+});
+
+test('withDeadline: an extension pushes the deadline out while the work waits', async () => {
+  const ext: DeadlineExtender = {};
+  const work = new Promise<string>(r => setTimeout(() => r('late but allowed'), 80));
+  const p = withDeadline(work, 40, 'extended', ext);
+  ext.extend?.(100);
+  assert.equal(await p, 'late but allowed');
 });
