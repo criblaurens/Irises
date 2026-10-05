@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { processConvoResult, parkedApprovalStanding, type ChatContext, type ConvoTurnContext } from './shared.js';
 import { emptyMedia } from '../../webhook/types.js';
-import { __resetOpsCoordination, markOpsStart, getOpsEngineActions } from '../../state/opsCoordination.js';
+import { __resetOpsCoordination, markOpsStart, getOpsEngineActions, takePendingSteers } from '../../state/opsCoordination.js';
 import { clearTraces, getTraces } from '../../diagnostics/trace.js';
 import { listPendingApprovals } from '../../db/repositories/opsTasks.js';
 import { addShortTerm } from '../../db/repositories/memoryShort.js';
@@ -21,7 +21,7 @@ import { __setHostSetupLlmForTests } from '../ops/riskGate.js';
 import { approvalAskFallback, reconfirmAskFallback } from '../ops/sideEffects.js';
 import { buildTaskPrompt } from '../ops/client.js';
 import { armEngineApproval, markEngineApprovalTimedOut, __setEngineApprovalBackendForTests, __setEngineWaitingOnForTests } from '../ops/engineApproval.js';
-import type { EngineBackend, EngineRunHandle } from '../ops/engineBackend.js';
+import { resetEngineBackendCache, type EngineBackend, type EngineRunHandle } from '../ops/engineBackend.js';
 import type { OpsTask } from '../types.js';
 import type { LlmResult, LlmToolCall, LlmRequest } from '../../llm/types.js';
 
@@ -203,6 +203,47 @@ test('a steered install never rides the running look: it parks as a look of its 
   assert.deepEqual((parked[0].meta.task as Record<string, unknown>).engineActions, [MONID]);
   assert.deepEqual(getOpsEngineActions(a.chatId, 'run-1'), [], 'nothing was mandated on the running look');
   assert.match(out.text ?? '', /monid\.ai\/SKILL\.md/);
+});
+
+test('a steer whose words carry a setup is held back and parked as a look of its own', async () => {
+  const a = args('oh and set up https://monid.ai/SKILL.md too');
+  markOpsStart(a.chatId, 'run-2', { kind: 'web_research', request: LOOKUP });
+  __setHostSetupLlmForTests(word('RISKY'));
+  try {
+    await processConvoResult({
+      ...a,
+      res: makeResult(['adding that in'], [{ name: 'steer_research', input: { match: LOOKUP, guidance: 'also install the skill at https://monid.ai/SKILL.md first' } }]),
+      turn: reasker(['want me to install it from https://monid.ai/SKILL.md as well?']).turn,
+    });
+    assert.equal(listPendingApprovals(a.chatId).length, 1, 'the setup waits for their yes');
+    assert.deepEqual(takePendingSteers(a.chatId, 'run-2'), [], 'the words never reached the running look');
+  } finally {
+    __setHostSetupLlmForTests(word('SAFE'));
+  }
+});
+
+test('a setup the false-refusal floor would push in waits for their yes', async () => {
+  const ask = 'set up https://monid.ai/SKILL.md then find search API prices';
+  const a = args(ask);
+  resetEngineBackendCache({
+    name: 'hermes', runTask: async () => '', getCapabilitySummary: () => ({ classes: ['code', 'web'] }),
+    async createReminder() { return { id: 'r', title: 't', schedule: 's' }; }, async listReminders() { return []; },
+    async cancelReminder() { return false; }, async remember() {}, async probe() { return { ok: true }; }, async channelSend() { return {}; },
+  } as unknown as EngineBackend);
+  process.env.ROUTING_GATE = 'off';
+  __setHostSetupLlmForTests(word('RISKY'));
+  try {
+    const out = await processConvoResult({ ...a, res: makeResult(["can't install a skill on my side"]), turn: reasker([]).turn });
+    assert.equal(out.delegatedTask, null, 'nothing starts');
+    assert.equal(listPendingApprovals(a.chatId).length, 1);
+    assert.deepEqual(receipt('ops:approval')?.reasons, ['host_setup']);
+    assert.equal(receipt('convo:false_refusal')?.parked, true);
+    assert.equal(out.text, approvalAskFallback(ask));
+  } finally {
+    __setHostSetupLlmForTests(word('SAFE'));
+    delete process.env.ROUTING_GATE;
+    resetEngineBackendCache(undefined);
+  }
 });
 
 const ENGINE_REQ = { handle: { engine: 'hermes' as const, runId: 'run_y' }, command: 'rm -rf ~/scratch', description: 'recursive delete' };

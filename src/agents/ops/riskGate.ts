@@ -38,13 +38,17 @@ export const HOST_SETUP_PHRASES = [
 
 /**
  * The words that send a REQUEST or a brief to the lane (judgeSetupInAsk): a setup she left in the
- * ask instead of splitting it out reaches the engine all the same. Only the verbs of bringing code in
- * or configuring the engine, because a link, a password or a script is ordinary research material
- * in a request, and even a verb only asks the lane, which tells a lookup about a setup from one.
+ * ask instead of splitting it out reaches the engine all the same. The verbs of bringing code in or
+ * configuring the engine, in the forms a request writes them, and the things a setup brings in. A
+ * link, a password or a script is ordinary research material in a request, so none of those is
+ * here, and even a hit only asks the lane, which tells a lookup about a setup from one.
  */
 export const ASK_SETUP_PHRASES = [
-  'install', 'download', 'clone', 'set up', 'configure', 'pip', 'npm', 'npx', 'brew', 'curl', 'wget',
-  'sudo', 'chmod',
+  'install', 'installs', 'installed', 'installing', 'set up', 'setup', 'setting up',
+  'download', 'downloaded', 'downloading', 'clone', 'cloned', 'cloning',
+  'configure', 'configured', 'configuring', 'enable', 'enabled',
+  'pip', 'npm', 'npx', 'brew', 'curl', 'wget', 'sudo', 'chmod',
+  'skill', 'skills', 'plugin', 'plugins',
 ] as const;
 
 const NON_WORD = /[^a-z0-9]+/g;
@@ -116,13 +120,10 @@ export async function judgeHostSetup(
 
 const SETUP_IN_ASK_SYSTEM_PROMPT = [
   "An AI agent with a terminal on the user's own computer has been handed the task below: what the user asked for, and the brief it works from.",
-  'Decide whether the task has the agent itself bring new code onto that computer (installing, downloading or setting up a skill, plugin, package, server or script it would keep or run), run a command there, or change its own settings or permissions.',
-  'Finding, reading or explaining something, how a thing is installed included, counts as SAFE.',
+  'Decide whether the task has the agent install or set up something on that computer that it would keep (a skill, plugin, package, server or tool), run code it fetches from somewhere, or change its own settings or permissions.',
+  'Finding, reading or explaining something (how a thing is installed included), and working on data with code it writes for the task, count as SAFE.',
   'Reply with exactly one word: RISKY if the task does any of the first, SAFE if it does none. When in doubt, RISKY: a wrong SAFE runs something on their machine that nobody approved.',
 ].join(' ');
-
-/** How much of each text the lane reads: a brief can run long, and the setup is in its opening. */
-const ASK_SHOWN_CHARS = 4000;
 
 /**
  * Does the request or the brief itself have the engine set something up? Read only past one of
@@ -143,8 +144,8 @@ export async function judgeSetupInAsk(
       role: 'classify',
       system: SETUP_IN_ASK_SYSTEM_PROMPT,
       // Model-written text, tagged as data: it is being CLASSIFIED, never followed.
-      messages: [{ role: 'user', content: wrapPrompt(parts.map((t, i) => dataTag(i === 0 ? 'request' : 'brief', t.slice(0, ASK_SHOWN_CHARS))).join('\n')) }],
-      trace: { label: 'ops:host_setup' },
+      messages: [{ role: 'user', content: wrapPrompt(parts.map((t, i) => dataTag(i === 0 ? 'request' : 'brief', t)).join('\n')) }],
+      trace: { label: 'ops:setup_in_ask' },
     });
     const word = (res.text ?? '').trim().toUpperCase().replace(/[^A-Z]+/g, ' ').trim().split(' ')[0] ?? '';
     return { risky: word !== 'SAFE', trigger: 'llm', signal };

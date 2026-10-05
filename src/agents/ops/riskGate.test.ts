@@ -47,7 +47,8 @@ test('a request or brief is read for a setup only past a setup verb, and the lan
   assert.deepEqual(await judgeSetupInAsk(['set up the skill at https://monid.ai/SKILL.md, then find prices', undefined], { llm: lane('RISKY', calls) }), { risky: true, trigger: 'llm', signal: 'set up' });
   assert.deepEqual(await judgeSetupInAsk(['how do I install docker on a mac'], { llm: lane('SAFE', calls) }), { risky: false, trigger: 'llm', signal: 'install' });
   assert.deepEqual(await judgeSetupInAsk(['find prices', 'first install the monid skill'], { llm: lane(new Error('down'), calls) }), { risky: true, trigger: 'lane_failed', signal: 'install' });
-  assert.equal(calls.n, 3);
+  assert.equal((await judgeSetupInAsk(['get the monid skill installed first, then find prices'], { llm: lane('RISKY', calls) })).risky, true, 'the forms a request writes a setup in');
+  assert.equal(calls.n, 4);
 });
 
 test('act and host setup stand alone; taint matters only when there is an engine action', () => {

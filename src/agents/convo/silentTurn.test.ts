@@ -18,6 +18,10 @@ import { REACTION_TOOL, DELEGATE_TO_OPS_TOOL, RECALL_MEMORY_TOOL } from './tools
 import { emptyMedia } from '../../webhook/types.js';
 import { __resetOpsCoordination } from '../../state/opsCoordination.js';
 import type { LlmRequest, LlmResult, LlmToolCall } from '../../llm/types.js';
+import { __setHostSetupLlmForTests } from '../ops/riskGate.js';
+
+// The setup screen's classify lane (ops/riskGate.ts judgeSetupInAsk) reads these asks as the lookups they are.
+__setHostSetupLlmForTests(async () => ({ text: 'SAFE', toolCalls: [], stopReason: 'end_turn' as const, provider: 'anthropic' as const, model: 'test' }));
 
 const ASK = 'haha ok tell me a joke about cats';
 
