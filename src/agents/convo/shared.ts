@@ -1446,6 +1446,9 @@ export interface LiveState {
   holdingBeats?: readonly string[];
   /** Her previous reply's bubbles an unsend can still reach, in the order the tool numbers them. */
   unsendBubbles?: readonly string[];
+  /** Her last text they have not answered asked whether they still want her texting first
+   *  (memory/proactiveBackoff.ts). This turn reads their answer. */
+  checkinAwaiting?: boolean;
 }
 
 /**
@@ -1869,6 +1872,12 @@ export function buildSystemPromptSections(
   if (takeBack?.length && tools?.some(t => t.name === 'unsend')) {
     const lines = takeBack.map((b, i) => `${i + 1}. ${neutralizeTagBreakouts(b.replace(/\s+/g, ' ').slice(0, 160))}`);
     push('unsend', `## Your previous reply can still be taken back\nThe bubbles of it still in reach:\n${lines.join('\n')}\nIf one of them genuinely annoyed or hurt them, or you are irritated enough to want it back, retract it with \`unsend\` and still own it in this reply. Rough words alone are no sign; read them against how this person talks. If you can't tell whether they mean it, ask instead and leave it standing.`);
+  }
+
+  // The back-off's one ask (memory/proactiveBackoff.ts) is still open. Like unsend, its tool lives far
+  // back in the system message, so the edge says what to do with the answer.
+  if (liveState?.checkinAwaiting) {
+    push('checkin', '## Your last text asked whether they still want you texting first\nRead whether this message answers it. A clear no: call `set_preference` key="texts_first" value=false and leave it there, no pushback and no making it about you. A clear yes, or a message about something else: save nothing and answer what they said. Never ask it again.');
   }
 
   if (extraSection) push('extra', extraSection);

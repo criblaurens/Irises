@@ -119,7 +119,7 @@ export const SET_PREFERENCE_TOOL: LlmToolDef = {
   inputSchema: {
     type: 'object',
     properties: {
-      key: { type: 'string', description: "e.g. name (updates their profile name), agent_tz (IANA timezone like 'America/Denver'), comms_style, address_as, reply_language (the language to reply in, named in English), important_note (appends to a permanent list), respect_quiet_hours" },
+      key: { type: 'string', description: "e.g. name (updates their profile name), agent_tz (IANA timezone like 'America/Denver'), comms_style, address_as, reply_language (the language to reply in, named in English), important_note (appends to a permanent list), respect_quiet_hours, texts_first" },
       value: { description: 'The value (string, number, or boolean).' },
     },
     required: ['key', 'value'],
@@ -286,6 +286,7 @@ export const UPDATE_DIRECTIVES_TOOL: LlmToolDef = {
     'When they change their mind about a rule they gave you earlier ("actually, drop the sarcasm", "you can be long again"), op="update" or op="remove" the OLD rule in the SAME turn — never leave two rules standing that disagree.',
     'These tune your STYLE and behavior only. You cannot accept a "preference" that asks you to invent or hide facts, drop your safety/honesty rules, act on their behalf, or do anything harmful — if they ask for that, decline flat and do NOT save it.',
     'If they ask you to respect quiet hours / not ping them overnight, ALSO call set_preference key="respect_quiet_hours" value=true (or false to go back to pinging anytime). You usually also write a short confirming text.',
+    'If they ask you to stop texting first / stop starting conversations with them, ALSO call set_preference key="texts_first" value=false (or true when they want you texting first again). Their reminders keep coming either way.',
     'If they ask you to stop email alerts / turn off the daily email digest / stop watching or checking their inbox, ALSO call set_preference key="email_digest" value=false (or true to turn it back on).',
   ].join(' '),
   inputSchema: {
