@@ -172,7 +172,7 @@ function caseArmFlags(body: string): string[] {
  *  configured as, so there is nothing for Configure to change later. */
 const NON_SETTING = [
   '--engine', '--yes', '-y', '--bridge', '--no-bridge', '--engine-env',
-  '--uninstall', '--detach-engine', '--purge-data', '--archive-data',
+  '--uninstall', '--detach-engine', '--purge-data', '--archive-data', '--no-gateway-restart',
   '--revert', '-h', '--help',
 ];
 
