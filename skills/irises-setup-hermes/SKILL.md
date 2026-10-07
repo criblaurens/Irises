@@ -61,7 +61,13 @@ node --version          # needs 22.13+ (Irises's local store uses the builtin no
 git --version
 curl --version
 hermes gateway status
+hermes config get model.default     # the model Irises's voice will inherit (step 2)
+hermes config get model.provider
+hermes config get model.base_url
 ```
+
+Those three are the only config values you read. **Never read `model.api_key`, and never print
+`~/.hermes/.env` or any other file with a key in it** — you name a key, you never show one.
 
 If `node --version` is below 22.13, look for a newer Node already on the box (nvm under
 `~/.nvm/versions/node/`, or Homebrew) and tell the person which one to put on `PATH`. Do not install
@@ -84,6 +90,27 @@ Ask only what is theirs to decide, and offer the default:
 
 Then tell them, before you run anything:
 
+- **Which model and API Irises will use.** The person cannot pick these here (the terminal menu asks;
+  this install keeps the default), so say them plainly, with the real values from step 1:
+  - **Engine: this hermes.** Deep work — research, email, files, reminders — is handed to you and
+    runs on your model, exactly as it does today.
+  - **Her voice** (every chat reply, plus two small helper calls per turn) **inherits your model, on
+    your API and your key**: `<model.default>` via `<model.provider>` at `<model.base_url>`, paid
+    from the key you already use — name it (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` or
+    `OPENAI_API_KEY` in hermes's `.env`), never its value. Say the consequence too: every chat turn
+    now costs and paces like one of your turns, so a large, slow or reasoning model makes her chat
+    slower and dearer.
+  - **The exception.** If the provider is one Irises cannot call directly — `bedrock`, `vertex`,
+    `gemini`, `copilot`, `nous`, `moa` — or the provider is empty or one Irises does not know and the
+    model id has no `/` in it, her voice cannot inherit: it runs on Irises's own default models instead, on whichever
+    OpenRouter, Anthropic or OpenAI key hermes's `.env` has. If it has none of those, her voice has
+    no model until they add one. Deep work still runs on your model either way. Say which case
+    applies before they say yes.
+  - **Want a different voice model?** That takes its own API key, which never travels through chat.
+    After the install, in their own terminal:
+    `IRISES_MODEL_API_KEY=… bash ./scripts/configure.sh --model-lane openrouter --model-slug <id>`
+    (or `anthropic`; `openai` also needs `--model-base-url`). It stops her borrowing your key;
+    `bash ./scripts/configure.sh --model-inherit` hands her voice back to your model.
 - **What changes in this hermes:** its `.env` gets `API_SERVER_ENABLED` and `API_SERVER_KEY` (if the
   API server is not on already), `IRISES_URL`, `IRISES_FRONT`, `IRISES_PUSH_TOKEN` and
   `IRISES_BRIDGE_TOKEN`, after a backup next to the file. Every key is recorded in
@@ -161,7 +188,12 @@ curl -s http://127.0.0.1:3000/health
 ```
 
 Use the port they installed on if it is not 3000. A JSON body with a `version` object is a healthy
-install. Then tell them where to talk to her: any fronted chat, the web chat at
+install. Its `models` object is what is actually live, so confirm the model in plain words from it:
+`models.voice` lists each voice role with its `model`, `provider` and `endpoint`, and
+`models.engine` names your deep-work model. If it differs from what you told them in step 2, say so.
+If any voice role shows `"configured": false`, her voice has no working key on that lane — tell them
+which key it needs (in hermes's `.env`, or `IRISES_MODEL_API_KEY` with `configure.sh --model-lane`),
+in their own terminal, never pasted into chat. Then tell them where to talk to her: any fronted chat, the web chat at
 `http://127.0.0.1:3000`, or `npm run chat` in the clone for a terminal session. If the health check
 fails, point them at `~/.irises/logs/server.log` and the installer's output — do not try to fix it by
 starting anything.
