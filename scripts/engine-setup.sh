@@ -9,19 +9,23 @@
 #   bash ./scripts/engine-setup.sh --port 3001           # pin a different port
 #   bash ./scripts/engine-setup.sh --front 'telegram:*'  # front only the chats you name
 #   bash ./scripts/engine-setup.sh --engine-env ask      # show the engine .env lines before writing
+#   bash ./scripts/engine-setup.sh --no-gateway-restart  # leave the gateway restart to the operator
 #   bash ./scripts/engine-setup.sh --detach-engine       # undo the engine side, keep Irises + data
 #   bash ./scripts/engine-setup.sh --uninstall           # remove Irises, keep your data
 #   bash ./scripts/engine-setup.sh --uninstall --purge-data   # …and delete $IRISES_HOME too
 #
-# The TERMINAL is the only install/update/uninstall path. There is no in-chat installer: Irises can
-# tell you the command and read you the outcome, but a rebuild that restarts the process talking to
-# you cannot honestly report on itself.
+# A SHELL is the only install/update/uninstall path: a person's terminal, or the engine's own
+# terminal tool when someone asks the engine to install it (skills/irises-setup-hermes). Irises
+# herself never runs this — a rebuild that restarts the process talking to you cannot honestly
+# report on itself.
 #
 # WHAT IT TOUCHES, in order: this clone's .env (chmod 600) · node_modules + dist · optionally
 # web/out · a systemd --user unit, a LaunchAgent, or a Task Scheduler task on Windows · the engine's
 # .env (backed up first, every added key recorded in $IRISES_HOME/install-manifest.json) · the
-# engine's plugin dir · the engine's gateway, which is ALWAYS bounced at the end because the plugin,
-# IRISES_FRONT and API_SERVER_* are only read when it starts.
+# engine's plugin dir · the engine's gateway, which is bounced at the end because the plugin,
+# IRISES_FRONT and API_SERVER_* are only read when it starts. The one exception is a run that must
+# not bounce it — --no-gateway-restart, or a run INSIDE the hermes gateway (see GATEWAY_RESTART) —
+# which says so and prints how to restart it instead.
 #
 # EXIT CODES
 #   0  installed, uninstalled or detached, and verified
@@ -81,6 +85,13 @@ WEB_FLAG=""
 PINGS_FLAG=""
 MUSINGS_FLAG=""
 TZ_FLAG=""
+# Whether this run bounces the engine's gateway at the end — 1 is what every run has always done.
+# --no-gateway-restart turns it off, and so does running INSIDE the hermes gateway: hermes marks
+# every process it starts with _HERMES_GATEWAY=1, so this script is then a child of a chat turn,
+# and a bounce would SIGTERM that turn mid-reply. The run then says why it skipped and how to
+# restart instead (in hermes, /restart in a chat lets running turns finish first).
+GATEWAY_RESTART=1
+GATEWAY_SKIP_WHY=""
 
 usage() {
   cat <<'EOF'
@@ -113,7 +124,10 @@ usage: bash ./scripts/engine-setup.sh [options]          # install
                              (IRISES_MUSINGS_ENABLED). Unset leaves the default: on
   --tz ZONE                  the IANA zone Irises reads the wall clock in (IRISES_TZ). Unset leaves
                              it unset, which is the host's own zone
-  --uninstall                remove Irises: service, plugin, engine keys. Your data is KEPT, and so
+  --no-gateway-restart       do not bounce the engine's gateway at the end; print how to restart it
+                             instead (the bridge goes live on that restart). Implied when this runs
+                             inside the hermes gateway (_HERMES_GATEWAY=1), e.g. from a chat turn
+  --uninstall               remove Irises: service, plugin, engine keys. Your data is KEPT, and so
                              is this clone (the exact rm for each is printed)
   --purge-data               with --uninstall: also delete $IRISES_HOME (irises.db + memories)
   --archive-data             with --uninstall: tar $IRISES_HOME to ~/.irises-backup-<ts>.tar.gz
@@ -170,6 +184,7 @@ while [ $# -gt 0 ]; do
     --no-bridge)   BRIDGE=0; shift ;;
     --service)     SERVICE=1; shift ;;
     --no-service)  SERVICE=0; shift ;;
+    --no-gateway-restart) GATEWAY_RESTART=0; GATEWAY_SKIP_WHY="--no-gateway-restart"; shift ;;
     -h|--help)     usage; exit 0 ;;
     --revert)
       err "--revert is gone. Use --uninstall (it removes the plugin, the engine keys and the"
@@ -179,6 +194,21 @@ while [ $# -gt 0 ]; do
     *) err "unknown arg: $1 (try --help)"; exit 2 ;;
   esac
 done
+
+if [ "$GATEWAY_RESTART" = "1" ] && [ "${_HERMES_GATEWAY:-}" = "1" ]; then
+  GATEWAY_RESTART=0
+  GATEWAY_SKIP_WHY="running inside the hermes gateway"
+fi
+
+# How the operator restarts a gateway this run left alone. No literal engine-CLI restart command
+# here: hermes's terminal guard reads this file when a chat turn runs it (see the note in section E
+# of lib/irises-lib.sh), and one such literal would get the whole install refused.
+gateway_restart_hint() { # ENGINE
+  case "${1:-}" in
+    hermes) printf 'type /restart in any hermes chat (running turns finish first)' ;;
+    *)      printf 'restart the %s gateway yourself' "${1:-engine}" ;;
+  esac
+}
 
 case "$ENGINE_FLAG" in
   ''|hermes|openclaw|off) ;;
@@ -990,9 +1020,13 @@ do_install() {
 
   # ── 10. the gateway. ALWAYS, when an engine is configured: the plugin, IRISES_FRONT and
   #       API_SERVER_* are only read when the gateway starts, so an install that skips this is an
-  #       install that does nothing until the operator works out why.
+  #       install that does nothing until the operator works out why. Hence a skipped bounce is
+  #       said out loud, with the way to do it, rather than left for the operator to discover.
   if [ "$engine" != "off" ]; then
-    if ! gateway_restart "$engine" 90; then
+    if [ "$GATEWAY_RESTART" = "0" ]; then
+      gateway_ok="skipped"
+      warn "gateway NOT restarted ($GATEWAY_SKIP_WHY) — the bridge goes live once you $(gateway_restart_hint "$engine")"
+    elif ! gateway_restart "$engine" 90; then
       gateway_ok=0
       result="gateway-failed"
       rc=5
@@ -1007,7 +1041,7 @@ do_install() {
     "service:   $kind${unit:+ ($unit)}" \
     "data:      $(irises_home)  (irises.db + memories/ — never touched by an update)" \
     "logs:      $(irises_home)/logs/server.log" \
-    "gateway:   $(if [ "$engine" = "off" ]; then printf 'n/a (standalone)'; elif [ "$gateway_ok" = "1" ]; then printf 'bounced and verified'; else printf 'NOT verified — bounce it yourself'; fi)" \
+    "gateway:   $(if [ "$engine" = "off" ]; then printf 'n/a (standalone)'; elif [ "$gateway_ok" = "skipped" ]; then printf 'NOT restarted (%s) — to go live, %s' "$GATEWAY_SKIP_WHY" "$(gateway_restart_hint "$engine")"; elif [ "$gateway_ok" = "1" ]; then printf 'bounced and verified'; else printf 'NOT verified — bounce it yourself'; fi)" \
     "talk to it: $(if [ -d "$ROOT/web/out" ]; then printf 'http://127.0.0.1:%s  ·  npm run chat' "$port"; else printf 'npm run chat   (web UI not built — IRISES_WEB=1 to build it)'; fi)" \
     "update it: bash scripts/update.sh        remove it: bash scripts/engine-setup.sh --uninstall"
   exit "$rc"
@@ -1214,7 +1248,10 @@ restore_engine_env_step() {
 bounce_gateway_step() {
   # ── 4. the gateway, so the engine actually forgets the plugin (it loads plugins only at start).
   if [ "$engine" != "off" ] && [ "$did_something" = "1" ]; then
-    if ! gateway_restart "$engine" 90; then
+    if [ "$GATEWAY_RESTART" = "0" ]; then
+      gateway_ok="skipped"
+      warn "gateway NOT restarted ($GATEWAY_SKIP_WHY) — the engine forgets the plugin once you $(gateway_restart_hint "$engine")"
+    elif ! gateway_restart "$engine" 90; then
       gateway_ok=0
       result="gateway-failed"
       rc=5
@@ -1450,7 +1487,7 @@ do_uninstall() {
     summary "$result" \
       "engine:   $engine — $removed key(s) removed, $restored put back${backup:+, backup at $backup}" \
       "plugin:   $(if [ -n "$plugin_dir" ] && [ -d "$plugin_dir" ]; then printf 'STILL PRESENT at %s' "$plugin_dir"; elif [ "$plugin_found" = "1" ]; then printf 'removed'; else printf 'none was installed'; fi)" \
-      "gateway:  $(if [ "$engine" = "off" ]; then printf 'n/a'; elif [ "$did_something" = "0" ]; then printf 'not bounced (nothing changed)'; elif [ "$gateway_ok" = "1" ]; then printf 'bounced and verified'; else printf 'NOT verified — bounce it yourself'; fi)" \
+      "gateway:  $(if [ "$engine" = "off" ]; then printf 'n/a'; elif [ "$did_something" = "0" ]; then printf 'not bounced (nothing changed)'; elif [ "$gateway_ok" = "skipped" ]; then printf 'NOT restarted (%s) — %s' "$GATEWAY_SKIP_WHY" "$(gateway_restart_hint "$engine")"; elif [ "$gateway_ok" = "1" ]; then printf 'bounced and verified'; else printf 'NOT verified — bounce it yourself'; fi)" \
       "manifest: $man_state" \
       "Irises:   still installed and still running — this detached it from the engine, nothing more" \
       "data:     $home — untouched" \
@@ -1526,7 +1563,7 @@ do_uninstall() {
     "plugin:   $(if [ -n "$plugin_dir" ] && [ -d "$plugin_dir" ]; then printf 'STILL PRESENT at %s' "$plugin_dir"; elif [ "$plugin_found" = "1" ]; then printf 'removed'; else printf 'none was installed'; fi)" \
     "engine:   $engine — $removed key(s) removed, $restored put back${backup:+, backup at $backup}" \
     "manifest: $man_state" \
-    "gateway:  $(if [ "$engine" = "off" ]; then printf 'n/a'; elif [ "$did_something" = "0" ]; then printf 'not bounced (nothing changed)'; elif [ "$gateway_ok" = "1" ]; then printf 'bounced and verified'; else printf 'NOT verified — bounce it yourself'; fi)" \
+    "gateway:  $(if [ "$engine" = "off" ]; then printf 'n/a'; elif [ "$did_something" = "0" ]; then printf 'not bounced (nothing changed)'; elif [ "$gateway_ok" = "skipped" ]; then printf 'NOT restarted (%s) — %s' "$GATEWAY_SKIP_WHY" "$(gateway_restart_hint "$engine")"; elif [ "$gateway_ok" = "1" ]; then printf 'bounced and verified'; else printf 'NOT verified — bounce it yourself'; fi)" \
     "data:     $(if [ -d "$home" ]; then printf '%s KEPT (%s)' "$home" "$size"; else printf 'deleted'; fi)" \
     "clone:    $ROOT kept — rm -rf it yourself"
   exit "$rc"

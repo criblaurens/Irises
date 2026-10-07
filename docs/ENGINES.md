@@ -84,14 +84,18 @@ On Windows those two commands run in **Git Bash** (it ships with the Git for Win
 anyway) or inside a **WSL2** shell. The Windows paths are stub-tested only and have not yet been run
 on a real Windows box — Linux and macOS are the verified platforms.
 
-There is no chat route in, and that is the design: the script's last step bounces the engine gateway,
-so an agent running it from a gateway-hosted session would kill the supervisor carrying its own turn,
-mid-reply (see *Install / uninstall* below).
+The script's last step bounces the engine gateway, so an agent running that bounce from a
+gateway-hosted session would kill the supervisor carrying its own turn, mid-reply (see *Install /
+uninstall* below). `--no-gateway-restart` skips it and prints how to restart instead, and the
+installer implies that flag on its own whenever it runs inside the hermes gateway (`_HERMES_GATEWAY=1`,
+which hermes sets on every process it starts).
 
-**Want to be walked through it?** The two setup skills are **guides, not installers**. Your agent
-explains what Irises is, runs the read-only prerequisite checks, hands you the exact commands to run
-in your own terminal, and verifies the result once you report back — it clones, builds, starts and
-restarts nothing. Install the guide for your engine:
+**Rather ask your engine?** The **hermes** setup skill installs Irises for you: hermes explains it,
+runs the read-only checks, asks which chats to front and waits for a yes, then runs
+`engine-setup.sh --yes` from its own terminal. From the hermes terminal chat the installer bounces the
+gateway as usual; from a messaging chat hermes adds `--no-gateway-restart` and asks you to type
+`/restart`, hermes's own command that lets running turns finish first. The **OpenClaw** skill is
+still a guide — it hands you the commands and verifies afterwards. Install the skill for your engine:
 
 ```bash
 # hermes
@@ -595,10 +599,11 @@ The menu (`bash ./scripts/irises.sh` → **Uninstall**) is this same ladder, one
 stopping the service and leaving everything else in place; it asks about the archive before the purge
 and requires the deletion to be typed out in words. All of these are run from a terminal on the
 engine's own machine (Git Bash or WSL2 on Windows). The
-installer and the uninstaller both cycle the gateway, which is exactly why neither can be run from a
-gateway-hosted chat: the agent would be killing its own supervisor mid-turn. The two setup skills are
-guides for that reason — they hand the person the commands and verify afterwards, and run nothing
-themselves.
+installer and the uninstaller both cycle the gateway, which is exactly why neither may cycle it from a
+gateway-hosted chat: the agent would be killing its own supervisor mid-turn. So a run from such a chat
+passes `--no-gateway-restart` (implied there by `_HERMES_GATEWAY=1`) and the person types `/restart`.
+That is how the hermes setup skill runs them; the OpenClaw skill hands the person the commands and
+verifies afterwards.
 
 ### Gateway restart notifications
 

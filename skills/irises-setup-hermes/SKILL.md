@@ -1,7 +1,7 @@
 ---
 name: irises-setup-hermes
-description: "Guide a person through installing Irises — a user-facing front-end (web chat / CLI, plus the engine bridge) that uses this hermes as its deep-work engine. Explains it, checks prerequisites, hands over the exact terminal commands, and verifies afterwards. It does not install anything itself."
-version: 2.0.0
+description: "Install Irises — a user-facing front-end (web chat / CLI, plus the engine bridge) that uses this hermes as its deep-work engine. Explains it, checks prerequisites, asks the person's questions and a clear yes, runs the installer, gets the gateway restarted the safe way for where you are talking, and verifies the result."
+version: 3.0.0
 author: Irises
 license: MIT
 platforms: [linux, macos, windows]
@@ -12,17 +12,16 @@ prerequisites:
   commands: [git, node, npm]
 ---
 
-# Irises Setup (hermes engine) — a guide, not an installer
+# Irises Setup (hermes engine) — install it, on the person's yes
 
-**You do not install Irises. The person does, in their own terminal.** Your job is to explain what
-Irises is, check that the box can run it, hand over the exact commands, set the right expectations,
-and verify the result once they say they are done.
+**You install Irises, from your own terminal, once the person has said yes.** Your job is to explain
+what Irises is, check that the box can run it, ask the few questions that are theirs to answer, run
+the installer, get the gateway restarted the safe way, and verify the result.
 
-Why it works this way: the installer's last step restarts the hermes gateway, because the API server
-and the bridge plugin are only read when the gateway comes up. Run from a gateway-hosted session,
-that final bounce kills the supervisor running your own turn, mid-reply — your answer never lands,
-and the person is left guessing whether the install finished. So the command belongs in a human's
-shell, not in yours.
+The one thing that needs care is the **gateway restart** at the end. Hermes reads the API server and
+the bridge plugin only when its gateway starts, so the install is not live until that restart. How it
+happens depends on where this conversation is running — check that first (step 0), because getting it
+wrong kills your own turn mid-reply.
 
 ## What Irises is (say this in your own words)
 
@@ -39,197 +38,201 @@ voice runs this hermes's OWN model on every lane it can reach — no stand-in sl
 chat turns cost and pace what this hermes's model does; deep work uses that same model, as always.
 There is nothing to configure by hand.
 
-## 1. Check the prerequisites (read-only — these you MAY run)
+## 0. Where are you running? (decides the restart)
+
+```bash
+echo "gateway=${_HERMES_GATEWAY:-0}"
+```
+
+- **`gateway=0` — the hermes terminal chat (`hermes` in a shell).** You are not inside the gateway, so
+  the installer can restart it for you and your turn survives. Run the install without
+  `--no-gateway-restart`; the restart is part of it.
+- **`gateway=1` — a messaging chat (Telegram, WhatsApp, Discord, Signal…).** You are a child of the
+  gateway. A restart from here would kill this very turn, which is why your terminal guard refuses
+  one. Run the install **with `--no-gateway-restart`**, report the result, then ask the person to
+  type **`/restart`** in this chat. `/restart` is hermes's own command: it lets running turns finish,
+  restarts the gateway, and tells them when it is back. (The installer also skips the restart on its
+  own whenever it sees `_HERMES_GATEWAY=1` — pass the flag anyway, so your command says what it does.)
+
+## 1. Check the prerequisites (read-only)
 
 ```bash
 node --version          # needs 22.13+ (Irises's local store uses the builtin node:sqlite)
 git --version
+curl --version
 hermes gateway status
 ```
 
-That is the entire list of commands you are allowed to run in this skill, plus the health check in
-step 5. If `node --version` is below 22.13, look for a newer Node already on the box (nvm under
-`~/.nvm/versions/node/`, or Homebrew) and tell the person which one to put on `PATH` — do not attempt
-a system install, and do not install it for them.
+If `node --version` is below 22.13, look for a newer Node already on the box (nvm under
+`~/.nvm/versions/node/`, or Homebrew) and tell the person which one to put on `PATH`. Do not install
+Node or any system package yourself — stop and tell them what is missing.
 
-On **Windows**, the person needs a bash to run the install in: **Git Bash**, which ships with the Git
-for Windows they already need for the clone, or a **WSL2** shell. Say so up front, and say the honest
-part too — the Windows paths are stub-tested only and have not yet been run on a real Windows box,
-so Linux and macOS are the platforms with mileage on them.
+On **Windows**, your terminal already runs commands in Git Bash, which is the shell the installer
+needs. Say the honest part up front: the Windows paths (the Git Bash install, the `Irises` Task
+Scheduler task) are stub-tested only, and this may be the first real run. Linux and macOS are the
+platforms with mileage on them.
 
-## 2. Hand them the install (they run this, you do not)
+## 2. Ask, explain, and get a clear yes
 
-Give them these two commands, exactly as written, and tell them to run them in a terminal on this
-machine (Git Bash or WSL2 if that machine is Windows):
+Ask only what is theirs to decide, and offer the default:
+
+- **Which chats should Irises front?** Default `*:*` — every chat on every platform this hermes
+  speaks, including their operator and control chats. A narrower answer becomes `--front`, e.g.
+  `--front 'telegram:*'` or `--front 'telegram:*,whatsapp:+1555*'`.
+- **Port?** Default 3000. Anything else becomes `--port N`.
+- **Timezone?** Default the host's own. Anything else becomes `--tz Europe/Paris` (an IANA zone).
+
+Then tell them, before you run anything:
+
+- **What changes in this hermes:** its `.env` gets `API_SERVER_ENABLED` and `API_SERVER_KEY` (if the
+  API server is not on already), `IRISES_URL`, `IRISES_FRONT`, `IRISES_PUSH_TOKEN` and
+  `IRISES_BRIDGE_TOKEN`, after a backup next to the file. Every key is recorded in
+  `~/.irises/install-manifest.json`, and the uninstall takes each one back out. The bridge plugin goes
+  into hermes's plugin folder. No hermes source code is touched.
+- **What gets installed:** a clone in `~/irises`, its npm dependencies and build, and a user-level
+  service (`systemd --user` on Linux, a LaunchAgent on macOS, a Task Scheduler task named `Irises` on
+  Windows) so she survives a reboot. Her data lives in `~/.irises`. No database, no root.
+- **The gateway restarts at the end** (or on their `/restart`, from a messaging chat). Any hermes chat
+  in flight ends there. Hermes then posts its own *"♻️ Gateway online"* message in their home channel —
+  that is hermes, not Irises, and it can be silenced per platform with
+  `<platform>.gateway_restart_notification: false` in hermes's config (theirs to edit, not yours).
+- **With bridge mode on, Irises answers the fronted chats** in her own voice and uses you as her
+  engine. You stay reachable directly in a terminal, still answer anything `IRISES_FRONT` does not
+  cover, and answer everything whenever Irises is down (fail-open, so a broken front never drops
+  messages).
+- **Shortly after the restart, Irises usually texts first** — a one-time introduction, sent only on a
+  chat this hermes has genuinely exchanged messages in before (the "first move", see Notes). A text
+  from her out of the blue is the feature working, not a glitch.
+
+**Wait for a clear yes.** "Sounds good" to the explanation is not a yes to the install — ask
+"Shall I install it now?" and act on the answer to that.
+
+## 3. Run the install
+
+Clone, unless `~/irises` already holds an Irises clone — then use it as it is (the installer repairs
+in place; pulling new code is an update, step 6). Never touch an Irises checkout anywhere else.
 
 ```bash
-git clone https://github.com/criblaurens/irises ~/irises && cd ~/irises
-bash ./scripts/irises.sh
+git clone https://github.com/criblaurens/irises ~/irises
 ```
 
-The second command opens a menu — install or repair, configure, update, uninstall, status, advanced —
-that asks which engine, which chats Irises fronts, which port, whether she runs as a service, and
-whether her own voice keeps inheriting this hermes's model. It prints the exact command it is about
-to run before running it, so they can see and keep what it did. `npm run setup` is the same menu.
+Then, from inside the clone, the installer in its flag form. `--yes` is required — the interactive
+menu (`bash ./scripts/irises.sh`, `npm run setup`) asks questions on a keyboard you do not have, so
+never run it.
 
-If they would rather not be asked anything, the one-shot form does the same install with every
-default:
+From the **hermes terminal chat** (`gateway=0`):
 
 ```bash
-bash ./scripts/engine-setup.sh --engine hermes --yes
+cd ~/irises && bash ./scripts/engine-setup.sh --engine hermes --yes --front '<their answer>'
 ```
 
-`--yes` means non-interactive: assume every default, never prompt. `~/irises` is just the usual
-spot — any folder they pick is fine, and the second command must run from inside whichever folder
-they chose.
+From a **messaging chat** (`gateway=1`):
 
-What the script does, so you can answer questions about it (it is short and commented — they can read
-it first):
+```bash
+cd ~/irises && bash ./scripts/engine-setup.sh --engine hermes --yes --front '<their answer>' --no-gateway-restart
+```
 
-- checks node 22.13+, git, curl, and that the port is free,
-- writes the Irises `.env` (mode 600): `OPS_BACKEND=hermes`, the API key, a generated
-  `ENGINE_PUSH_TOKEN`, and `PORT=3000` (the committed `deploy/app.env` baseline says `8080`, which is
-  the Docker image's port behind Caddy, so a local install pins 3000). No database — Irises persists
-  to `~/.irises` on its own,
-- reuses the Anthropic / OpenRouter / OpenAI key (and `OPENAI_BASE_URL`) this hermes already uses,
-  for Irises's own small voice models, and never overwrites a value they set themselves,
-- installs dependencies and builds; the web client is rebuilt only when it was built before,
-- registers Irises as a **user-level service** — `systemd --user` on Linux, a LaunchAgent on macOS, a
-  Task Scheduler task named `Irises` on Windows, with a detached `nohup` fallback where none of those
-  exists — so she survives a reboot without root,
-- waits for her to answer `/health` on the new build, and only then touches hermes: enables the
-  hermes API server if it is not already on (the documented `API_SERVER_ENABLED` switch plus a
-  generated key, appended to hermes's own environment config after a backup, every change printed
-  first and recorded in `~/.irises/install-manifest.json`). Run from the menu, that edit is shown
-  first — the exact lines, key names and non-secret values, never a secret's value — and made only on
-  a yes; decline it and the installer writes nothing to hermes's env file and prints the block for
-  them to paste instead, with fronting simply staying off until they do,
-- sets up **bridge mode by default** and writes `IRISES_FRONT`, so Irises fronts every chat on every
-  platform out of the box unless they narrow it (the menu asks; the flag form is `--front`, and the
-  default is `*:*` — see the consequences below). `--no-bridge` skips the plugin and the fronting,
-- optionally gives Irises's own voice a model instead of inheriting this hermes's — the menu's model
-  step, or `--model-lane` + `--model-slug`. Tell them what that trade is: the voice then runs on the
-  key they supply (given through `IRISES_MODEL_API_KEY` in their environment, never as a flag) and
-  stops borrowing this hermes's key and endpoint. Deep work still runs on this hermes's model,
-- optionally writes two of this clone's own settings, which the menu offers as skippable extras and
-  the flags spell `--web on|off` (`WEB_ENABLED` — the browser chat UI and `npm run chat`; unset leaves
-  the clone's `.env` alone, and a fresh install has it on) and `--tz ZONE` (`IRISES_TZ` — the wall
-  clock she reads; unset means the host's own zone). The admin dashboard's password goes the way the
-  model key does: `IRISES_DASHBOARD_PASSWORD` in their environment, never a flag, never printed —
-  leaving it blank keeps the shipped default rather than changing anything,
-- **restarts the hermes gateway last**, so the API server and the bridge plugin are live, and prints a
-  summary with an honest exit code.
+Add `--port N` / `--tz ZONE` if they answered with one. Keep the quotes around the `--front` value.
 
-## 3. Set these three expectations before they run it
+**It takes several minutes** (npm install and two builds). Run it with `background=true` and
+`notify_on_complete=true`, or in the foreground with `timeout=600` (your foreground limit). Tell them
+it is running and roughly how long, so the silence is not a surprise.
 
-- **The gateway will restart at the end.** Any hermes chat in flight ends there. This is normal and
-  it is the step that turns the bridge on: until it happens, hermes still answers its own channels.
-- **Hermes will announce its own return** — *"♻️ Gateway online — Hermes is back and ready."* — in
-  their home channel, after that restart and after every future one. That is hermes's message, not
-  Irises's. If they would rather not see it, hermes silences it per platform with
-  `<platform>.gateway_restart_notification: false` in hermes's own config. Mention it as optional;
-  never edit hermes's config for them.
-- **The default `IRISES_FRONT=*:*` means Irises answers everything.** They can narrow it at install
-  rather than afterwards — the menu asks which chats she fronts, and the flag is `--front`. With
-  bridge mode on, a person texting any
-  channel this hermes owns (iMessage, WhatsApp, Discord, …) reaches Irises, who answers in her own
-  voice and uses hermes as her engine. Hermes is unchanged, still reachable directly in a terminal
-  (`hermes`), still transparently answers anything `IRISES_FRONT` does not cover — and answers
-  everything whenever Irises is down (fail-open, so a broken front never drops messages). Narrow the
-  scope by editing the `IRISES_FRONT` line in hermes's env to fnmatch patterns over
-  `<platform>:<chat_id>`, or with `bash ./scripts/configure.sh --front '<patterns>'`; blanking it
-  (`--front none`) makes the plugin inert from the gateway's next start, which is when that value is
-  read — so the edit and the gateway restart go together. Tell them their operator and control chats
-  are inside `*:*` too.
+Read the end of the output. The last line is `RESULT: <token>` and the exit code means:
+`0` installed and verified · `1` a step failed (the message says which) · `2` a usage mistake in your
+command · `4` Irises did not answer `/health` in time · `5` installed, but the gateway did not come
+back verified. Relay the summary block in plain words — what is installed, where, and what is left.
+On anything but `0`, quote the failing line, point at `~/.irises/logs/server.log`, and stop: do not
+retry with different flags or try to fix it by starting things by hand.
 
-Also worth saying once: **shortly after that restart, Irises usually texts first** — a one-time
-introduction, sent only on a chat this hermes has genuinely exchanged messages in before (the "first
-move", see Notes). A text from her out of the blue is the feature working, not a glitch.
+## 4. The restart
 
-## 4. Never do any of this
+- **`gateway=0`:** the installer already restarted the gateway; the summary's `gateway:` line says
+  `bounced and verified`. Nothing more to do.
+- **`gateway=1`:** the summary's `gateway:` line says `NOT restarted`. Ask the person to type
+  **`/restart`** in this chat, and to message you once hermes says it is back. That message starts a
+  fresh turn — go to step 5 then. If they prefer a terminal, `hermes gateway restart` there does the
+  same; you never run it yourself from a messaging chat.
 
-- **Never clone, install, build, or start anything.** Not in a temp folder, not "just to check".
-- **Never open the menu.** `bash ./scripts/irises.sh` and `npm run setup` are the person's command,
-  not yours — it installs, updates, uninstalls and detaches, and every one of those ends in a gateway
-  bounce. Hand it over; do not run it, and do not pipe answers into it on their behalf.
-- **Never run the setup script or the updater**, and never run any command that restarts or cycles
-  the gateway or its supervisor — not through the hermes CLI's own gateway subcommands, not through
-  `systemctl`, `launchctl`, `kickstart`, `schtasks`, or direct process control. That guard is
-  correct; do not route around it.
-- **Never touch another Irises checkout** that already exists somewhere on this machine.
-- **Never edit hermes's config**, including for the restart-notification key above.
-
-## 5. Verify after they report back (read-only)
+## 5. Verify (read-only)
 
 ```bash
 curl -s http://127.0.0.1:3000/health
 ```
 
-Use the port they actually installed on if it is not 3000. A JSON body with a `version` object is a
-healthy install. Then tell them where to talk to her: any fronted engine channel, the web chat at
+Use the port they installed on if it is not 3000. A JSON body with a `version` object is a healthy
+install. Then tell them where to talk to her: any fronted chat, the web chat at
 `http://127.0.0.1:3000`, or `npm run chat` in the clone for a terminal session. If the health check
-fails, point them at `~/.irises/logs/server.log` and the script's own output — do not try to fix it by
+fails, point them at `~/.irises/logs/server.log` and the installer's output — do not try to fix it by
 starting anything.
 
-## 6. The other commands, for later
+## 6. Later: settings, update, uninstall
 
-All of them are in the same menu (`bash ./scripts/irises.sh`, from the Irises folder), and all of them
-are theirs to run, never yours.
+Same rules for all of these: say what it will change, get a clear yes, run it from `~/irises` with
+`--yes`, and **from a messaging chat always add `--no-gateway-restart`** and then ask for `/restart`.
 
-**Change a setting** (from the Irises folder, in their terminal) — the port, the service, which chats
-she fronts, the model her voice runs on, the browser chat, the timezone, the dashboard password, or
-any documented `.env` key, without re-running the installer:
+**Change a setting** — the port, the service, which chats she fronts, the model her voice runs on, the
+browser chat, the timezone, the dashboard password, or any documented `.env` key, without re-running
+the installer:
 
 ```bash
 bash ./scripts/configure.sh --show              # report only: every setting and where it came from
-bash ./scripts/configure.sh --tz Europe/Paris   # the wall clock she reads
-bash ./scripts/configure.sh --front 'telegram:*'  # narrow which chats she fronts (or --front none)
-bash ./scripts/configure.sh --model-inherit     # hand her voice back to this hermes's model
+bash ./scripts/configure.sh --tz Europe/Paris --yes
+bash ./scripts/configure.sh --front 'telegram:*' --yes
+bash ./scripts/configure.sh --model-inherit --yes   # hand her voice back to this hermes's model
 ```
 
-Each run previews what it would change, asks once, backs the file up, and writes. A change to one of
-Irises's own settings then restarts her and checks the build back off `/health`; a `--front` change
-is this hermes's `.env`, so it bounces the gateway instead and leaves her running untouched. A
-`--port` always restarts her, and takes `IRISES_URL` in this hermes's `.env` with it — and bounces
-the gateway — only where the install wrote that key and it still names the port being moved off.
-Hand these over and read back what they report — never run them yourself: a `--front` or `--port`
-change can edit this hermes's own `.env` and bounce the gateway, so a run from a gateway-hosted chat
-would kill the supervisor mid-reply, the same reason the install is theirs.
+`--show` is read-only — run it first when they ask what is set. A change to Irises's own settings
+restarts her and checks `/health`; a `--front` or `--port` change can edit this hermes's `.env` and
+needs a gateway restart to take effect. Secrets never go on the command line: `--set KEY` with the
+value in `IRISES_SET_VALUE`, which the person sets in their own terminal, never in chat.
 
-**Update** (from the Irises folder, in their terminal):
+**Update:**
 
 ```bash
 bash ./scripts/update.sh
 ```
 
-It pulls, rebuilds, restarts Irises, and restarts the hermes gateway. If the new build fails to
-compile or fails to come up, it rolls back to the build that was running. There is no chat command for
-it — Irises will say so herself if asked, and hand over that same line. She does check for new builds
-on her own and mentions one once, in chat, when it is waiting.
+It pulls, rebuilds, restarts Irises, and restarts the gateway (skipped with `--no-gateway-restart`).
+If the new build fails to compile or come up, it rolls back to the one that was running. Irises checks
+for new builds on her own and mentions one once, in chat, when it is waiting.
 
-**Uninstall** (from the Irises folder):
-
-```bash
-bash ./scripts/engine-setup.sh --uninstall
-```
-
-Stops and unregisters the service, removes the bridge plugin and the engine-side keys the installer
-added, restarts the gateway, and keeps their data. `--purge-data` deletes `~/.irises` too, and that is
-not reversible — `--archive-data` alongside it writes a `~/.irises-backup-<timestamp>.tar.gz` first,
-and nothing is deleted if that archive cannot be written.
-
-**Detach** (from the Irises folder) — the middle rung, and usually the one someone actually wants when
-they say they want this hermes back:
+**Detach** — usually what someone means when they say they want this hermes back:
 
 ```bash
-bash ./scripts/engine-setup.sh --detach-engine
+bash ./scripts/engine-setup.sh --detach-engine --yes
 ```
 
 It undoes every engine-side change — the bridge plugin, the keys Irises added, the values it moved,
-`IRISES_FRONT` — and bounces the gateway, so **this hermes is left as if Irises had never been
-installed, except that the `.bak-irises-*` backup files stay**. Irises herself is untouched: her
-service keeps running, the clone stays, and `~/.irises` — her memory and database — is left alone.
-They can attach her again later by running the install once more.
+`IRISES_FRONT` — so **this hermes is left as if Irises had never been installed, except that the
+`.bak-irises-*` backup files stay**. Irises herself, her service, the clone and `~/.irises` are left
+alone; running the install again attaches her back.
+
+**Uninstall:**
+
+```bash
+bash ./scripts/engine-setup.sh --uninstall --yes
+```
+
+Stops and unregisters the service, removes the bridge plugin and the engine-side keys the installer
+added, and keeps their data. **Deleting the data is theirs to type, never yours:** `--purge-data`
+deletes `~/.irises` (memory and database) and cannot be undone — hand them that command
+(`--archive-data` alongside it writes a `~/.irises-backup-<timestamp>.tar.gz` first) instead of
+running it.
+
+## 7. Never
+
+- **Never restart the gateway yourself from a messaging chat** — not with the hermes CLI, not through
+  `systemctl`, `launchctl`, `schtasks`, or process control, not by scheduling it for later. Your
+  terminal guard refuses those for a reason; do not route around it. Ask for `/restart`.
+- **Never run the interactive menu** (`bash ./scripts/irises.sh`, `npm run setup`), and never pipe
+  answers into it.
+- **Never install before a clear yes**, and never pass `--purge-data`.
+- **Never install system packages** (Node, git, curl) — say what is missing.
+- **Never touch another Irises checkout** that already exists somewhere else on this machine.
+- **Never edit hermes's config by hand** — the installer makes its own `.env` changes, backed up and
+  recorded; anything beyond that (like the restart-notification key) is the person's to change.
+- **Never print a secret.** The installer never shows one; do not go looking in the `.env` files.
 
 ## Notes
 
