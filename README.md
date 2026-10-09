@@ -5,12 +5,10 @@
 </a>
 
 <br>
-<br>
 
 <b>The personality layer for your AI agent.</b><br>
 Irises texts like a person and hands the heavy work to hermes.
 
-<br>
 <br>
 
 <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/license-MIT-000000?style=flat-square"></a>
@@ -19,7 +17,6 @@ Irises texts like a person and hands the heavy work to hermes.
 <a href="https://github.com/NousResearch/hermes-agent"><img alt="Engine hermes-agent" src="https://img.shields.io/badge/engine-hermes--agent-000000?style=flat-square"></a>
 <a href="#contributing"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-000000?style=flat-square"></a>
 
-<br>
 <br>
 
 <a href="#what-irises-is">What Irises is</a> &nbsp;·&nbsp;
