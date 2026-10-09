@@ -23,7 +23,7 @@ bash ./scripts/engine-setup.sh --engine hermes --yes   # or: --engine openclaw
 
 Piping answers into the menu works too, but it is the flag scripts that are stable for automation: a piped run still walks the menu, and end-of-input quits with exit `2` and a pointer back to the flags.
 
-**The terminal is the only install path**, and that is deliberate: the installer restarts the engine gateway at the end, and an agent that ran it from a gateway-hosted chat would be killing its own supervisor mid-reply. Your engine can still *walk you through it* — the two setup skills are **guides, not installers**. Your agent explains what Irises is, runs the read-only prerequisite checks, hands you the exact commands to run yourself, and verifies the result once you report back:
+**Or ask your engine.** The installer restarts the engine gateway at the end, and an agent that ran that restart from a gateway-hosted chat would be killing its own supervisor mid-reply — so the two setup skills handle it differently. The **hermes** skill installs: hermes explains what Irises is, runs the read-only checks, asks your questions and waits for a yes, then runs `engine-setup.sh --yes` itself. From the hermes terminal chat the installer restarts the gateway as usual; from a messaging chat hermes adds `--no-gateway-restart` (the installer also implies it whenever it runs inside the gateway, `_HERMES_GATEWAY=1`) and asks you to type `/restart`, hermes's own drain-first restart. The **OpenClaw** skill is still a guide: it hands you the commands to run yourself and verifies the result once you report back:
 
 ```bash
 # hermes:
@@ -76,7 +76,7 @@ A few minutes later Irises makes her [first move](ENGINES.md#first-move-install-
 
 > **Windows is honest but young.** The Windows paths — the Git Bash install, the `Irises` Task Scheduler task, the WSL2 branch — are covered by stub tests only; nobody has yet run them on a real Windows box. Treat Linux and macOS as the tested platforms and tell me what breaks on yours. Under WSL2, reboot survival needs systemd enabled in `/etc/wsl.conf` (`[boot] systemd=true`); without it the installer uses the detached fallback, which does not come back by itself.
 
-> **Prefer to be walked through it?** Install the setup skill for your engine ([commands above](#installing-on-an-engine)) and ask for it. It is a guide: your agent explains the install, runs the read-only prerequisite checks, hands you these commands to run yourself, and verifies the result afterwards. It never clones, builds, starts, or restarts anything — see the note above for why.
+> **Prefer to ask your engine?** Install the setup skill for your engine ([commands above](#installing-on-an-engine)) and ask for it. On hermes it runs this install for you after your yes, and from a messaging chat leaves the gateway restart to your `/restart`. On OpenClaw it is a guide that hands you these commands — see the note above for why the two differ.
 
 <details>
 <summary><b>Debug: run standalone, with no engine at all</b></summary>

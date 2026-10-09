@@ -261,7 +261,7 @@ A few minutes after the install, Irises makes her [first move](docs/ENGINES.md#f
 
 The other useful flags are `--no-bridge`, `--no-service`, `--port N`, `--front PATTERNS`, `--engine-env ask|print`, `--model-lane` with `--model-slug`, `--web on|off` and `--tz ZONE`. Run `bash ./scripts/engine-setup.sh --help` for the full list. The full guide is [docs/ENGINES.md](docs/ENGINES.md).
 
-**Would you prefer a guide?** Your agent can walk you through the install. The setup skill explains what Irises is, runs the read-only checks, gives you the commands and verifies the result. It never installs anything by itself.
+**Would you rather ask hermes?** Install the setup skill and hermes does the install for you. It explains what Irises is, runs the read-only checks, asks which chats Irises should front, and waits for your yes. Then it runs the installer and checks the result. In the hermes terminal chat, the installer restarts the gateway too. In a messaging chat such as Telegram, a restart would end hermes's own reply, so hermes installs with `--no-gateway-restart` and asks you to type `/restart`.
 
 ```bash
 hermes skills install https://raw.githubusercontent.com/criblaurens/irises/main/skills/irises-setup-hermes/SKILL.md

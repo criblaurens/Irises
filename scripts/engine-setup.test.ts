@@ -80,7 +80,7 @@ function runUninstall(args: string[], box = sandbox()) {
 test('--help documents every flag it accepts, and exits 0', () => {
   const r = run(['--help']);
   assert.equal(r.code, 0, r.err);
-  for (const flag of ['--engine', '--uninstall', '--yes', '--no-bridge', '--no-service', '--port', '--purge-data']) {
+  for (const flag of ['--engine', '--uninstall', '--yes', '--no-bridge', '--no-service', '--no-gateway-restart', '--port', '--purge-data']) {
     assert.ok(r.out.includes(flag), `--help must document ${flag}\n${r.out}`);
   }
   assert.ok(!r.out.includes('set -euo pipefail'), 'the help text stops at the header');
@@ -110,6 +110,19 @@ test('--port rejects a non-numeric value with exit 2', () => {
   const r = run(['--port', 'http://3000', '--yes']);
   assert.equal(r.code, 2);
   assert.match(r.err, /port/i);
+});
+
+test('--no-gateway-restart is accepted, and a run inside the hermes gateway implies it', () => {
+  // The setup skill has hermes run this from a chat turn; a bounce there would SIGTERM that turn.
+  // --help after the flag proves the parser took it (an unknown flag exits 2 before --help).
+  assert.equal(run(['--no-gateway-restart', '--help']).code, 0);
+  assert.match(SOURCE, /\$\{_HERMES_GATEWAY:-\}" = "1" \][^\n]*\n\s*GATEWAY_RESTART=0/);
+  // Every gateway step checks the switch before it bounces: the install's and the shared uninstall/detach one.
+  const bounces = SOURCE.match(/if \[ "\$GATEWAY_RESTART" = "0" \]; then\n\s*gateway_ok="skipped"/g) ?? [];
+  assert.equal(bounces.length, 2, 'the install bounce and bounce_gateway_step both honour GATEWAY_RESTART');
+  assert.equal((SOURCE.match(/gateway_restart "\$engine" 90/g) ?? []).length, 2, 'no third, unguarded bounce');
+  // …and the skip tells the operator how to restart, in the words a hermes chat understands.
+  assert.match(SOURCE, /type \/restart in any hermes chat/);
 });
 
 test('the exit-code table is documented in the header', () => {
