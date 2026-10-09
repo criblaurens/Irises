@@ -9,15 +9,12 @@
 <b>The personality layer for your AI agent.</b><br>
 Irises texts like a person and hands the heavy work to hermes.
 
-<br>
 
 <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/license-MIT-000000?style=flat-square"></a>
 <a href="https://nodejs.org/"><img alt="Node 22" src="https://img.shields.io/badge/node-%E2%89%A5%2022.13-000000?style=flat-square&logo=node.js&logoColor=white"></a>
 <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-000000?style=flat-square&logo=typescript&logoColor=white"></a>
 <a href="https://github.com/NousResearch/hermes-agent"><img alt="Engine hermes-agent" src="https://img.shields.io/badge/engine-hermes--agent-000000?style=flat-square"></a>
 <a href="#contributing"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-000000?style=flat-square"></a>
-
-<br>
 
 <a href="#what-irises-is">What Irises is</a> &nbsp;·&nbsp;
 <a href="#how-it-works">How it works</a> &nbsp;·&nbsp;
