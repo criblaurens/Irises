@@ -464,13 +464,7 @@ Please keep the parts that make Irises one person intact. Those parts are the bu
 
 Irises is released under the [MIT License](LICENSE). You can use it, fork it and build commercial products on it.
 
-The license asks one thing in return: credit. Keep the copyright line and the license text with every copy of Irises, or of substantial parts of it, that you ship.
-
-If your product shows credits, an About screen or an open-source notices page, the line to use is:
-
-> Based on [Irises](https://github.com/criblaurens/Irises) by Rivian.
-
-To cite Irises in writing, use the **Cite this repository** button on GitHub (it reads [CITATION.cff](CITATION.cff)).
+The license asks one thing in return which is credit. Keep the copyright line and the license text with every copy of Irises, or of substantial parts of it, that you ship.
 
 <br>
 
