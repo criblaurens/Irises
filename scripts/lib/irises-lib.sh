@@ -1472,10 +1472,24 @@ is_our_server() { # PID
 # pid (node's own process.pid) that the MSYS signal layer has no translation for — kill -0 on it
 # either fails on a live server or, worse, hits an unrelated MSYS process with the same number.
 _pid_alive() { # PID
-  local pid="${1:-}"
+  local pid="${1:-}" rows=""
   case "$pid" in ''|*[!0-9]*) return 1 ;; esac
   if _is_windows; then
-    if tasklist //FI "PID eq $pid" //FO CSV //NH 2>/dev/null | grep -q "\"$pid\""; then return 0; fi
+    # `if` guards the substitution, so a failing tasklist does not abort a `set -e` caller here.
+    if rows="$(tasklist //FI "PID eq $pid" //FO CSV //NH 2>/dev/null)"; then
+      # tasklist ANSWERED and listed no such pid: the pidfile is genuinely stale.
+      case "$rows" in *"\"$pid\""*) return 0 ;; esac
+      return 1
+    fi
+    # tasklist is missing or failed, and that must not read as "the server is dead": _pid_alive feeds
+    # server_pid, and a false negative there turns a restart into a no-op that then reports
+    # health-failed while the old build is still serving happily. Ask PowerShell before believing it.
+    if command -v powershell.exe >/dev/null 2>&1; then
+      if powershell.exe -NoProfile -NonInteractive -Command \
+        "if (Get-Process -Id $pid -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }" >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
     return 1
   fi
   if kill -0 "$pid" 2>/dev/null; then return 0; fi

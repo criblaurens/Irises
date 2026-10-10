@@ -44,6 +44,11 @@ COPY --from=web-builder /app/web/out ./web/out
 # Expose port (matches PORT=8080 in the VM .env / Caddy reverse_proxy target)
 EXPOSE 8080
 
+# The image does not carry deploy/app.env (where PORT=8080 is set for a local clone), and
+# src/index.ts falls back to 3000 — so without this line a bare `docker run -p 8080:8080` reaches
+# nothing while the Dockerfile advertises 8080. Compose masks it by passing app.env as env_file.
+ENV PORT=8080
+
 # Local state (SQLite + memory-tier markdown) lives here — compose mounts a named
 # volume over it. Created + chowned BEFORE dropping to the node user so the volume
 # inherits writable ownership on first mount.

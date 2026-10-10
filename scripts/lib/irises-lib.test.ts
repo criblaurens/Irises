@@ -1742,6 +1742,35 @@ printf '"node.exe","4242","Console","1","120,000 K"\n'
   assert.match(dead.out, /PID=\[\]/, 'no tasklist row means the pidfile is stale');
 });
 
+test('a tasklist that FAILS is not read as a dead server — PowerShell is asked first', () => {
+  // The distinction the branch turns on: tasklist answering "no such pid" is the pidfile being stale,
+  // but tasklist being MISSING or erroring says nothing about the server. Reading the second as the
+  // first turns a restart into a no-op and reports health-failed over a server that is still serving.
+  const state = mkdtempSync(join(tmpdir(), 'irises-winpid2-'));
+  writeFileSync(join(state, 'irises.pid'), '4242\n');
+  const psAliveAndOurs = String.raw`
+printf 'powershell argv:%s\n' "$*" >> "$STUB_LOG"
+case "$*" in
+  *Get-Process*) exit 0 ;;
+esac
+printf 'C:\\Program Files\\nodejs\\node.exe C:\\irises\\dist\\index.js\n'
+`;
+  const r = runLib('printf "PID=[%s]\\n" "$(server_pid)"', {
+    stubs: {
+      uname: 'echo MSYS_NT-10.0-22631',
+      tasklist: 'printf "tasklist argv:%s\\n" "$*" >> "$STUB_LOG"; exit 1',
+      'powershell.exe': psAliveAndOurs,
+    },
+    env: { IRISES_HOME: state },
+  });
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+  assert.match(r.out, /PID=\[4242\]/, 'a live server must not look dead just because tasklist failed');
+  assert.ok(
+    r.log.some(l => l.includes('Get-Process') && l.includes('4242')),
+    `PowerShell is the fallback that settles it:\n${r.log.join('\n')}`,
+  );
+});
+
 test('server_stop terminates the tree with taskkill on Windows and polls tasklist for the result', () => {
   const state = mkdtempSync(join(tmpdir(), 'irises-winstop-'));
   writeFileSync(join(state, 'irises.pid'), '4242\n');
