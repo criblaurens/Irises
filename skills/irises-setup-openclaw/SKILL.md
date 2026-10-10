@@ -100,7 +100,7 @@ What the script does, so you can answer questions about it:
   the clone's `.env` alone, and a fresh install has it on) and `--tz ZONE` (`IRISES_TZ` — the wall
   clock she reads; unset means the host's own zone). The admin dashboard's password goes the way the
   model key does: `IRISES_DASHBOARD_PASSWORD` in their environment, never a flag, never printed —
-  leaving it blank keeps the shipped default rather than changing anything,
+  leaving it blank leaves `/dashboard` answering only this machine rather than changing anything,
 - **restarts the gateway last** so the plugin is loaded, and prints a summary with an honest exit code.
 
 ## 3. Set these two expectations before they run it

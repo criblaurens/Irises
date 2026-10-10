@@ -56,7 +56,7 @@ import { executeUnsend, noteInbound, noteSentBubble, type UnsendRequest } from '
 import { recordInboundMessage } from './db/repositories/inboundMessages.js';
 import { resolveTappedReply, type ResolvedReply } from './state/replyResolution.js';
 import { createDiagnosticsRouter } from './diagnostics/dashboard.js';
-import { createAdminDashboardRouter } from './diagnostics/adminDashboard.js';
+import { createAdminDashboardRouter, passwordConfigured } from './diagnostics/adminDashboard.js';
 import { beginTurn } from './diagnostics/trace.js';
 import { recordTurnTrace, type TurnTraceDraft } from './diagnostics/turnTrace.js';
 import { loadContext } from './agents/loadContext.js';
@@ -1289,8 +1289,12 @@ app.use(createEnginePushRouter({ deliver: proactive.deliver }));
 app.use(createDiagnosticsRouter());
 
 // Admin orchestration dashboard — the password-gated GUI at /dashboard showing the
-// agent-to-agent prompt flow graph per chat/user (password: DASHBOARD_PASSWORD).
+// agent-to-agent prompt flow graph per chat/user (password: DASHBOARD_PASSWORD; with none
+// set it answers loopback requests only, and says so once at boot).
 app.use(createAdminDashboardRouter());
+if (!passwordConfigured()) {
+  console.log('[dashboard] DASHBOARD_PASSWORD unset — /dashboard is localhost-only');
+}
 
 // ── Channels ─────────────────────────────────────────────────────────────────
 // The web/CLI debug channel (chat with Irises in the browser or via `npm run chat` — no external

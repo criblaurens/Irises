@@ -389,7 +389,7 @@ wiz_extras() { # step 6
   if ask_yn "Enable the browser chat UI (and npm run chat)?" y; then W_WEB="on"; else W_WEB="off"; fi
   if ask_yn "Let her text first to ask how things you left hanging went?" y; then W_PINGS="on"; else W_PINGS="off"; fi
   if ask_yn "Let her text first about what is on her own mind?" y; then W_MUSINGS="on"; else W_MUSINGS="off"; fi
-  W_DASH_PW="$(ask_secret "Dashboard password (blank = keep the shipped default):")" || W_DASH_PW=""
+  W_DASH_PW="$(ask_secret "Dashboard password (blank = /dashboard answers only this machine):")" || W_DASH_PW=""
   # The default offered is the host's own zone, which is what an unset IRISES_TZ already means — so
   # the answer is a confirmation rather than a guess. It is written even when it EQUALS that zone:
   # extras were asked for, this is the answer, and a box that is later moved to another region

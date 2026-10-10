@@ -143,7 +143,8 @@ environment:
                              else — never a flag, never printed, never logged
   IRISES_FRONT_PATTERN       the env form of --front
   IRISES_DASHBOARD_PASSWORD  the admin dashboard's password (DASHBOARD_PASSWORD). Read from the
-                             environment for the same reason as the model key, and never printed
+                             environment for the same reason as the model key, and never printed.
+                             Unset leaves /dashboard answering this machine only
 
 exit codes: 0 ok · 1 a step failed · 2 usage · 4 health not verified · 5 gateway not verified
 every run that gets past argument parsing ends its stdout with: RESULT: <token>

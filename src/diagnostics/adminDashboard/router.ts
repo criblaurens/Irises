@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { authed, checkPassword, rateLimited, sessionCookie } from './auth.js';
+import { authed, checkPassword, passwordConfigured, rateLimited, sessionCookie } from './auth.js';
+import { isLoopback } from '../../channels/loopback.js';
 import { LOGIN_PAGE } from './views/login.js';
 import { buildAppPage } from './assemble.js';
 import { registerTurnRoutes } from './api/turns.js';
@@ -23,6 +24,14 @@ import { registerAffectRoutes } from './api/affect.js';
 
 export function createAdminDashboardRouter(): Router {
   const router = Router();
+
+  // Runs before every /dashboard route below — login, API, page. With no DASHBOARD_PASSWORD
+  // configured the dashboard is loopback-only: a deploy that forgot to set one must not serve
+  // prompts and memory to the internet. With one configured this middleware is a no-op.
+  router.use((req: Request, res: Response, next) => {
+    if (passwordConfigured() || isLoopback(req)) { next(); return; }
+    res.status(403).send('forbidden — set DASHBOARD_PASSWORD to use the dashboard from another machine');
+  });
 
   router.post('/dashboard/login', (req: Request, res: Response) => {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';

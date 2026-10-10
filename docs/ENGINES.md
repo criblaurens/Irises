@@ -65,7 +65,8 @@ a box that is already installed — port and service, fronted chats, voice model
 timezone, dashboard password, any documented `.env` key — through `bash ./scripts/configure.sh`, with
 no wizard, no `npm ci` and no rebuild. The install wizard is seven steps, and the sixth — **optional
 extras** — is skipped unless asked for: the browser chat UI, the timezone, and the dashboard password,
-which is typed unseen and, left blank, keeps the shipped default rather than setting anything. Every
+which is typed unseen and, left blank, leaves the dashboard answering only this machine rather than
+setting anything. Every
 prompt answers to a number, going back included, and the uninstall menu defaults to **Back**, because
 each of its other entries removes something.
 
@@ -157,7 +158,7 @@ zone, so a box that moves region later keeps the clock its owner chose); and `--
 the engine side while leaving Irises alone (see *Taking it out again* below). The admin dashboard's
 password follows the model key's rule — `IRISES_DASHBOARD_PASSWORD` in the environment, never a flag,
 written into the clone's `.env` (mode 600) as `DASHBOARD_PASSWORD` and never printed; leave it unset
-and the dashboard keeps the password that ships with the code, which is a reason to set one rather
+and the dashboard answers only this machine, which is a reason to set one rather
 than a reason to relax.
 
 `--uninstall` takes the whole install back out again (the user service, the plugin, the

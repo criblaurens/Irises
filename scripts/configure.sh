@@ -625,7 +625,7 @@ show_report() {
   if [ -n "$(env_get "$ENV_FILE" DASHBOARD_PASSWORD)" ]; then
     ui "  dashboard password: <set>  (.env)"
   else
-    ui "  dashboard password: shipped default  (.env carries none)"
+    ui "  dashboard password: <unset> — /dashboard is localhost-only  (.env carries none)"
   fi
 
   out=""
