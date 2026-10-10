@@ -198,10 +198,15 @@ test('a QUIET turn renders the quiet block, and a HOOK turn the open-kinds one',
   assert.equal(quietBlock.split('question').length - 1, 1, 'and it appears there and nowhere else');
 
   const hook = buildSystemPromptSections(...build({ hooks: HOOK, moments: [], thesis: '' }));
-  assert.ok(textOf(hook).includes('Open to you this turn: a judgment, a callback or a tangent.'));
+  // FOUR kinds since f7afa57 made the question a first-class hook kind (gated by the affect ceiling
+  // and the group rule rather than banned outright), so an unfiltered HOOK turn opens all four.
+  assert.ok(textOf(hook).includes('Open to you this turn: a judgment, a callback, a tangent or a question.'));
 
-  // …and only the ALLOWED kinds reach the prompt.
-  const narrowed: HookDirective = { ...HOOK, forbidden: ['judgment', 'tangent'] };
+  // …and only the ALLOWED kinds reach the prompt. Three of the four are forbidden here so exactly one
+  // survives: forbidding judgment and tangent alone would still leave the question, which f7afa57
+  // made a first-class kind — the assertion below is about the FILTER, not about how many kinds the
+  // mode happens to leave open, and the four-kind case above already covers the joining.
+  const narrowed: HookDirective = { ...HOOK, forbidden: ['judgment', 'tangent', 'question'] };
   const one = buildSystemPromptSections(...build({ hooks: narrowed, moments: [], thesis: '' }));
   assert.ok(textOf(one).includes('Open to you this turn: a callback.'));
 });
@@ -689,18 +694,23 @@ test('a task turn that hooked anyway is counted and receipted, and is NOT re-ask
 });
 
 test('a HOOK turn that ASKED is off-turn too — the one ban an idle turn carries', async () => {
-  // The second shape of the same receipt. An idle turn forbids the question with no condition
-  // attached (persona/hooks.ts), and the cost of the slip outlives the beat: the ledger tail is now
-  // `question`, which is what hands the NEXT short message a share turn it did not earn
-  // (persona/idle.ts `followUpOutstanding`). So the row has to exist, and it has to say which mode
-  // had no room for the move — a reader who only saw `emitted: 'question'` would go looking for the
-  // task answer that never happened.
+  // The second shape of the same receipt, in the form f7afa57 left it: the question is no longer
+  // banned on an idle turn by the shape itself, so the ban that makes this a slip comes from the
+  // DIRECTIVE's `forbidden` list — the affect ceiling is closed, or the group closes the room
+  // (shared.ts). An open ceiling with an empty `forbidden` is a valid question and correctly gets no
+  // row; that boundary is the next test.
+  //
+  // The cost of the slip outlives the beat either way: the ledger tail is now `question`, which is
+  // what hands the NEXT short message a share turn it did not earn (persona/idle.ts
+  // `followUpOutstanding`). So the row has to exist, and it has to say which mode had no room for the
+  // move — a reader who only saw `emitted: 'question'` would go looking for the task answer that
+  // never happened.
   const calls: string[] = [];
   const args = turnArgs();
   await processConvoResult({
     ...args,
     res: envelope(['what did they end up saying'], 'question'),
-    hooks: hookArgs(HOOK),
+    hooks: hookArgs({ ...HOOK, forbidden: ['question'] }),
     turn: turnCtx(async req => { calls.push(String(req.trace?.label)); return envelope(['x']); }),
   });
   assert.deepEqual(calls, [], 'the same bargain as the task case: counted, never re-asked');
@@ -870,14 +880,14 @@ test('an IDLE message through the front door renders the hooks block, the Turn l
   // ordinary idle turn: the kinds are open, the anchor states the HOOK law, and the one thing the
   // clock adds is the register line saying the reply is small.
   assert.equal(select?.reason, 'hook', 'the clock is not a reason for anything');
-  // The one CARRYING kind closed here is the CLIMATE's doing, not the hour's: this chat's candor
-  // sits below its floor band, which is what `compileAffect` reads as `no_judgment`. The question
-  // beside it was closed by the SHAPE — an idle turn forbids that kind with no condition attached,
-  // because nothing was shared for it to follow up on (persona/hooks.ts `selectHook`) — and the
-  // section below it names neither one.
-  assert.deepEqual(select?.forbidden, ['judgment', 'question'], 'the clock closes nothing of its own');
+  // The one kind closed here is the CLIMATE's doing, not the hour's: this chat's candor sits below
+  // its floor band, which is what `compileAffect` reads as `no_judgment`. The question used to sit
+  // beside it, closed by the SHAPE with no condition attached; f7afa57 removed that unconditional
+  // ban, so an idle turn now forbids the question only when the ceiling or the room does — neither of
+  // which is doing anything here.
+  assert.deepEqual(select?.forbidden, ['judgment'], 'the clock closes nothing of its own');
   assert.ok(system.includes(HOOK_LATE_LINE), 'the register line rode along');
-  assert.ok(system.includes('Open to you this turn: a callback or a tangent.'),
+  assert.ok(system.includes('Open to you this turn: a callback, a tangent or a question.'),
     'under an open line naming the kinds the register left');
   assert.ok(!system.includes(HOOK_NONE_OPEN));
   // The anchor's law at the recency edge is the HOOK one, and it agrees with the section.
@@ -1039,12 +1049,17 @@ test('a SHARE turn through the front door renders the share block, the anchor la
   assert.equal(select?.idleLayer, 'fast_path');
   assert.equal(receipt('idle:classify'), undefined, 'the follow-up relaxation costs no call at all');
 
-  // THE DOSE, end to end. Her last move was a question, so the kind is closed this turn whatever her
-  // weather says (persona/hooks.ts: the ledger tail is read separately from the compiled ceiling),
-  // and the line that says what a follow-up IS is absent rather than negated.
-  assert.deepEqual(select?.forbidden, ['question'], 'when they answer, the next move is what you make of the answer');
-  assert.ok(system.includes('Open to you this turn: a judgment, a callback or a tangent. One of them, never two, and it is the reply, not a beat after one.'));
-  assert.ok(!system.includes(SHARE_QUESTION_LINE), 'a ban she reads is a kind she is thinking about');
+  // THE DOSE, end to end. One move, never two — and the kind list is what enforces it. The ledger
+  // tail no longer closes the question here: f7afa57 removed the share branch's back-to-back ban, so
+  // two questions in a row are permitted and the repeat rule fires only once TWO of a kind already
+  // sit at the tail (persona/hooks.ts `repeatedTailKind`). What closes a kind on this turn is the
+  // climate's `no_judgment` band, the same one the idle case above reads.
+  assert.deepEqual(select?.forbidden, ['judgment'], 'the climate closes the judgment, not the ledger');
+  assert.ok(system.includes('Open to you this turn: a callback, a tangent or a question. One of them, never two, and it is the reply, not a beat after one.'));
+  // …and because the question IS open on this turn, the line that says what a follow-up is renders
+  // (persona/hooks.ts: it is pushed only when `allowed` includes the question). It used to be absent
+  // here, back when the ledger tail banned the kind — the line is the open case's, never a ban's.
+  assert.ok(system.includes(SHARE_QUESTION_LINE), 'the follow-up line rides an open question');
   // The hour is a register here exactly as it is on an idle turn (this file's clock is 02:00 UTC).
   assert.ok(system.includes(SHARE_LATE_LINE), 'the same volume rule, in the share block\'s own words');
 

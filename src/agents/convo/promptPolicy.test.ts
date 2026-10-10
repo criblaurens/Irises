@@ -44,9 +44,14 @@ import type { PersonaTurn } from './shared.js';
 
 test('every rule anchor is still in the persona, verbatim', () => {
   const persona = convoPersonaWithCraft();
+  // Compared on COLLAPSED whitespace. The corpus is hard-wrapped prose, so a re-wrapped paragraph
+  // used to fail this test although not one word had changed — never_defend, never_suck_up and
+  // kill_switch were red for exactly that reason and nothing else. Reflowing a paragraph is not
+  // deleting a rule, and deleting a rule is the only thing this test is here to catch.
+  const flatPersona = persona.replace(/\s+/g, ' ');
   for (const { id, personaAnchor } of RULE_ANCHORS) {
     assert.ok(
-      persona.includes(personaAnchor),
+      flatPersona.includes(personaAnchor.replace(/\s+/g, ' ')),
       `the "${id}" rule is gone from the persona corpus (Context.md + every craft page) — its anchor no longer appears: ${JSON.stringify(personaAnchor)}. If the rewrite was deliberate, update RULE_ANCHORS in the same commit.`,
     );
   }
