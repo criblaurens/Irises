@@ -13,6 +13,7 @@
 // (it can make Irises speak).
 import { Router, type Request } from 'express';
 import { resolveChannel } from '../channels/registry.js';
+import { isLoopback } from '../channels/loopback.js';
 import { record } from '../diagnostics/trace.js';
 import type { ProactiveMessage, ProactiveOutcome, ProactiveEmailMeta } from '../pipeline/proactiveDelivery.js';
 
@@ -22,15 +23,10 @@ const MAX_META_CHARS = 200;
 
 export type PushKind = 'reminder' | 'email' | 'memo';
 
-// Exact match, never a substring: `includes('127.0.0.1')` also accepts a real remote address that
-// merely CONTAINS the loopback text, and the tokenless mode is the dev fallback that guards a door
-// which can make Irises speak.
-const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-
 function authorized(req: Request): boolean {
   const token = process.env.ENGINE_PUSH_TOKEN;
   if (token) return req.headers['x-engine-token'] === token;
-  return LOOPBACK.has(req.ip || req.socket.remoteAddress || '');
+  return isLoopback(req);
 }
 
 function str(v: unknown, cap: number): string | undefined {

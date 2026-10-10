@@ -15,6 +15,7 @@
 // script provisions it once into the engine's plugin environment.
 import { Router, type Request } from 'express';
 import { noteBridgeChat } from './channel.js';
+import { isLoopback } from '../loopback.js';
 import { parseBridgeInbound } from './contract.js';
 import { claimBridgeInbound, bridgeInboundDedupEnabled } from '../../db/repositories/bridgeInboundSeen.js';
 import { record } from '../../diagnostics/trace.js';
@@ -22,15 +23,10 @@ import type { AgentClient, EnqueueInbound } from '../../index.js';
 
 export { mapBridgeMedia, normalizeTimestamp } from './contract.js';
 
-// Exact match, never a substring: `includes('127.0.0.1')` also accepts a real remote address that
-// merely CONTAINS the loopback text, and the tokenless mode is the dev fallback that guards a door
-// which can make Irises speak.
-const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-
 function authorized(req: Request): boolean {
   const token = process.env.ENGINE_PUSH_TOKEN;
   if (token) return req.headers['x-bridge-token'] === token;
-  return LOOPBACK.has(req.ip || req.socket.remoteAddress || '');
+  return isLoopback(req);
 }
 
 export function createBridgeInboundRouter(deps: { enqueueInbound: EnqueueInbound; agentClient: AgentClient }): Router {

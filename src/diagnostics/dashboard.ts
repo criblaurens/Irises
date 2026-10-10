@@ -1,13 +1,13 @@
 import { Router, Request } from 'express';
 import { getTraces, clearTraces, diagnosticsEnabled } from './trace.js';
+import { isLoopback } from '../channels/loopback.js';
 
 // Guard: if DEBUG_TOKEN is set, require it (?token= or x-debug-token). Otherwise
-// only allow localhost. Prompts can contain PII, so don't expose this openly.
+// only allow localhost, by exact address match. Prompts can contain PII, so don't expose this openly.
 function authorized(req: Request): boolean {
   const token = process.env.DEBUG_TOKEN;
   if (token) return req.query.token === token || req.headers['x-debug-token'] === token;
-  const ip = req.ip || req.socket.remoteAddress || '';
-  return ip.includes('127.0.0.1') || ip.includes('::1');
+  return isLoopback(req);
 }
 
 export function createDiagnosticsRouter(): Router {

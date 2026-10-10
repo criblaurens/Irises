@@ -13,6 +13,7 @@ import { Router, type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { emptyMedia } from '../../webhook/types.js';
 import { attachWebClient } from './channel.js';
+import { isLoopback } from '../loopback.js';
 import { webChatId, WEB_DEBUG_HANDLE } from './identity.js';
 import { getActiveOps, requestOpsCancel } from '../../state/opsCoordination.js';
 import type { AgentClient, EnqueueInbound } from '../../index.js';
@@ -25,13 +26,13 @@ export interface WebRouterDeps {
 const HEARTBEAT_MS = 15_000;
 
 // Guard (same policy as /debug): if DEBUG_TOKEN is set, require it (?token= or x-debug-token);
-// otherwise only allow localhost. POST /api/web/message drives a full agent turn (LLM spend), so
-// this must never sit open on the internet. EventSource can't set headers, hence the query param.
+// otherwise only allow localhost, by exact address match. POST /api/web/message drives a full agent
+// turn (LLM spend), so this must never sit open on the internet. EventSource can't set headers,
+// hence the query param.
 function authorized(req: Request): boolean {
   const token = process.env.DEBUG_TOKEN;
   if (token) return req.query.token === token || req.headers['x-debug-token'] === token;
-  const ip = req.ip || req.socket.remoteAddress || '';
-  return ip.includes('127.0.0.1') || ip.includes('::1');
+  return isLoopback(req);
 }
 
 export function createWebRouter(deps: WebRouterDeps): Router {
