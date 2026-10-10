@@ -231,6 +231,8 @@ You do not need a database and you do not need an API key of your own. Irises re
 
 The command `npm run setup` opens the same menu. Deploy scripts and agents use the flag form instead, because it asks no questions.
 
+> **On Windows, use `bash ./scripts/irises.sh` from Git Bash.** npm runs its scripts through `cmd.exe`, where `bash` is usually not the Git Bash you installed — it is either absent or, when WSL is installed, `C:\Windows\System32\bash.exe`, which would run the installer inside WSL against a different filesystem than the one you cloned into. The `bash ./scripts/…` form is the one to use on every platform.
+
 ```bash
 bash ./scripts/engine-setup.sh --engine hermes --yes
 ```
