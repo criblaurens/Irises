@@ -84,6 +84,7 @@
 set -euo pipefail
 
 source "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib/irises-lib.sh"
+# shellcheck disable=SC2034  # read by the sourced library (lib/irises-lib.sh), not by this file
 IRISES_LOG_TAG="irises-configure"
 
 # The report and the preview print with this, not with `say`: the menu shows both inline, and a log
@@ -661,6 +662,7 @@ fi
 # The library's prompt helpers read THIS, never the terminal: whether a run may ask a question is a
 # decision this script has already made, above, out of --yes and the no-TTY case. Published before
 # the first prompt below, which is the only rule about where it goes.
+# shellcheck disable=SC2034  # read by the sourced library (lib/irises-lib.sh), not by this file
 IRISES_ASSUME_YES="$ASSUME_YES"
 
 # A signal trap's `exit` fires the EXIT trap as well, and the RESULT line is latched there, so the

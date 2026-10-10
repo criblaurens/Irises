@@ -284,6 +284,7 @@ fi
 # The library's prompt helpers read THIS, never the terminal: whether a run may ask a question is a
 # decision this script has already made, above, out of --yes and the no-TTY case. Published once,
 # here, so every ask_* below agrees with the two `[ "$ASSUME_YES" = "1" ]` branches further down.
+# shellcheck disable=SC2034  # read by the sourced library (lib/irises-lib.sh), not by this file
 IRISES_ASSUME_YES="$ASSUME_YES"
 
 ROOT="$(irises_root)"

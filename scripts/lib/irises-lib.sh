@@ -90,6 +90,8 @@ irises_home() {
   if [ -z "$h" ]; then h="${IRISES_HOME:-}"; fi
   if [ -z "$h" ]; then h="$(env_get "$root/deploy/app.env" IRISES_HOME)"; fi
   if [ -z "$h" ]; then h="$HOME/.irises"; fi
+  # shellcheck disable=SC2088  # the `~/` in the pattern and the ${h#...} is a LITERAL prefix being
+  # stripped, not a path anyone expects the shell to expand.
   case "$h" in
     "~")   h="$HOME" ;;
     "~/"*) h="$HOME/${h#\~/}" ;;
@@ -348,7 +350,8 @@ env_remove_irises_block() { # FILE KEY…
 # written around by name, and a future rename of it must not quietly drop it out of the pattern.
 is_secret_key() { # KEY -> 0 when its VALUE must never be printed
   case "${1:-}" in
-    *_KEY|*_TOKEN|*_PASSWORD|*_SECRET|API_SERVER_KEY) return 0 ;;
+    # `*_KEY` already covers API_SERVER_KEY; it used to be spelled out beside the globs.
+    *_KEY|*_TOKEN|*_PASSWORD|*_SECRET) return 0 ;;
   esac
   return 1
 }
@@ -631,6 +634,8 @@ tcp_open() { # HOST PORT
 
 hermes_home() {
   local h="${HERMES_HOME:-$HOME/.hermes}"
+  # shellcheck disable=SC2088  # the `~/` in the pattern and the ${h#...} is a LITERAL prefix being
+  # stripped, not a path anyone expects the shell to expand.
   case "$h" in
     "~")   h="$HOME" ;;
     "~/"*) h="$HOME/${h#\~/}" ;;
@@ -641,6 +646,8 @@ hermes_home() {
 # OpenClaw profiles can relocate the whole state dir; honour the override, else ~/.openclaw.
 openclaw_home() {
   local h="${OPENCLAW_STATE_DIR:-${CLAWDBOT_STATE_DIR:-$HOME/.openclaw}}"
+  # shellcheck disable=SC2088  # the `~/` in the pattern and the ${h#...} is a LITERAL prefix being
+  # stripped, not a path anyone expects the shell to expand.
   case "$h" in
     "~")   h="$HOME" ;;
     "~/"*) h="$HOME/${h#\~/}" ;;

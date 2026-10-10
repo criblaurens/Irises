@@ -1,0 +1,94 @@
+name: CI
+
+# Nothing ran these automatically before, which is how the persona pins drifted ninety-odd commits
+# past their own alarm bells and left `npm test` red on main without anyone noticing. This is the
+# thing that notices.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch cancels the first: the suite takes ~90s and a stale run's result
+# is never the one anyone is waiting for.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu + macos are the tested platforms (see the README's platform note). Two Node lines
+        # because 22.13 is the floor the local store needs and CI should prove the floor still holds,
+        # while the newer line catches deprecations early.
+        os: [ubuntu-latest, macos-latest]
+        node: ['22.13', '24.x']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Type-check the server
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Type-check the scripts
+        run: npm run typecheck:scripts
+      - name: Unit tests (src + scripts)
+        run: npm test
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Lint the lifecycle scripts at warning level
+        # Every script is bash 3.2-compatible on purpose (macOS ships 3.2), so the dialect flag is
+        # pinned rather than left to the distro default.
+        run: |
+          shellcheck --shell=bash -S warning \
+            scripts/*.sh scripts/lib/irises-lib.sh scripts/e2e/*.sh
+
+  web:
+    name: web client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+  windows-smoke:
+    name: windows smoke (build only)
+    runs-on: windows-latest
+    # The Windows path is stub-tested only and has never run on a real Windows box, so this job is
+    # INFORMATION, not a gate: a red run here is a bug report, and it must not block the tested
+    # platforms. Remove continue-on-error once someone has actually run an install there.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13'
+          cache: npm
+      # `shell: bash` is Git Bash, which is the shell the installer documents for Windows.
+      - name: Install and build under Git Bash
+        shell: bash
+        run: |
+          npm ci
+          npm run build
+      - name: The build stamped a version
+        shell: bash
+        run: test -s dist/version.json

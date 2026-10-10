@@ -615,6 +615,7 @@ else
 fi
 check "no receipt was left for a build that never ran" test ! -f "$STATE/update-receipt.json"
 check "and the engine was told nothing" absent "$STUB_LOG" "plugins enable irises-bridge"
+# shellcheck disable=SC2034  # set for the diff message below, and read from there
 REVERT_BUILD_SHA="$(unpublish "$BADBUILD_SHA")" \
   || fatal "could not revert the uncompilable commit upstream"
 

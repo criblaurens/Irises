@@ -101,6 +101,7 @@ fi
 
 # The library's prompt helpers read this, never the terminal — the decision is --yes, and it is made
 # up there in the flags.
+# shellcheck disable=SC2034  # read by the sourced library (lib/irises-lib.sh), not by this file
 IRISES_ASSUME_YES="$ASSUME_YES"
 
 # Armed HERE, past every usage exit and before the first byte of real work: the guard releases the
