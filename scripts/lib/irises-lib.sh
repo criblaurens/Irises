@@ -1031,6 +1031,26 @@ _xml_escape() { # TEXT
   printf '%s' "$s"
 }
 
+# One systemd unit ARGUMENT, ready to paste after `ExecStart=`. systemd splits that line on
+# whitespace, so an unquoted path under `/home/alice/My Projects/Irises` became three arguments and
+# the service never started — the same class of bug as the XML one above, on the other platform.
+# `%` is a specifier to systemd (`%h`, `%i`, `%%`) and doubles inside any unit value; `\` and `"`
+# need escaping only inside the quotes this adds.
+_systemd_quote() { # TEXT -> "escaped"
+  printf '"%s"' "$(_systemd_escape "${1:-}")"
+}
+
+# The escaping alone, for a value that supplies its OWN quotes (Environment="K=V") or that systemd
+# reads as the whole rest of the line (WorkingDirectory=, StandardOutput=append:…), where the % rule
+# still applies but the wrapping must not run twice.
+_systemd_escape() { # TEXT
+  local s="${1:-}"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//%/%%}"
+  printf '%s' "$s"
+}
+
 _irises_xdg() { printf '%s' "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"; }
 
 # systemd needs systemctl AND a user bus to talk to (a fresh SSH session with linger off has
@@ -1126,19 +1146,19 @@ service_install() { # ROOT NODE_BIN
         printf 'StartLimitIntervalSec=0\n'
         printf '\n[Service]\n'
         printf 'Type=simple\n'
-        printf 'ExecStart=%s %s/dist/index.js\n' "$node" "$root"
-        printf 'WorkingDirectory=%s\n' "$root"
-        printf 'Environment="PATH=%s"\n' "$path"
-        printf 'Environment="IRISES_HOME=%s"\n' "$home"
-        if [ -n "$opts" ]; then printf 'Environment="NODE_OPTIONS=%s"\n' "$opts"; fi
+        printf 'ExecStart=%s %s\n' "$(_systemd_quote "$node")" "$(_systemd_quote "$root/dist/index.js")"
+        printf 'WorkingDirectory=%s\n' "$(_systemd_escape "$root")"
+        printf 'Environment="PATH=%s"\n' "$(_systemd_escape "$path")"
+        printf 'Environment="IRISES_HOME=%s"\n' "$(_systemd_escape "$home")"
+        if [ -n "$opts" ]; then printf 'Environment="NODE_OPTIONS=%s"\n' "$(_systemd_escape "$opts")"; fi
         printf 'Restart=on-failure\n'
         printf 'RestartSec=5\n'
         printf 'KillSignal=SIGTERM\n'
         printf 'TimeoutStopSec=30\n'
         # append: needs systemd 240+ (Ubuntu 20.04+). On anything older systemd refuses to load the
         # unit; swap both lines for `journal` and read it with: journalctl --user -u irises -f
-        printf 'StandardOutput=append:%s/server.log\n' "$logs"
-        printf 'StandardError=append:%s/server.log\n' "$logs"
+        printf 'StandardOutput=append:%s/server.log\n' "$(_systemd_escape "$logs")"
+        printf 'StandardError=append:%s/server.log\n' "$(_systemd_escape "$logs")"
         printf '\n[Install]\n'
         printf 'WantedBy=default.target\n'
       } > "$unit" || { err "could not write $unit — is it writable, and is there room on the disk?"; return 1; }
@@ -1167,14 +1187,14 @@ service_install() { # ROOT NODE_BIN
         printf '<plist version="1.0">\n<dict>\n'
         printf '    <key>Label</key>\n    <string>%s</string>\n' "$(service_label)"
         printf '    <key>ProgramArguments</key>\n    <array>\n'
-        printf '        <string>%s</string>\n' "$node"
-        printf '        <string>%s/dist/index.js</string>\n' "$root"
+        printf '        <string>%s</string>\n' "$(_xml_escape "$node")"
+        printf '        <string>%s</string>\n' "$(_xml_escape "$root/dist/index.js")"
         printf '    </array>\n'
-        printf '    <key>WorkingDirectory</key>\n    <string>%s</string>\n' "$root"
+        printf '    <key>WorkingDirectory</key>\n    <string>%s</string>\n' "$(_xml_escape "$root")"
         printf '    <key>EnvironmentVariables</key>\n    <dict>\n'
-        printf '        <key>PATH</key>\n        <string>%s</string>\n' "$path"
-        printf '        <key>IRISES_HOME</key>\n        <string>%s</string>\n' "$home"
-        if [ -n "$opts" ]; then printf '        <key>NODE_OPTIONS</key>\n        <string>%s</string>\n' "$opts"; fi
+        printf '        <key>PATH</key>\n        <string>%s</string>\n' "$(_xml_escape "$path")"
+        printf '        <key>IRISES_HOME</key>\n        <string>%s</string>\n' "$(_xml_escape "$home")"
+        if [ -n "$opts" ]; then printf '        <key>NODE_OPTIONS</key>\n        <string>%s</string>\n' "$(_xml_escape "$opts")"; fi
         printf '    </dict>\n'
         printf '    <key>RunAtLoad</key>\n    <true/>\n'
         # KeepAlive as a dict, NOT `true`: a bare true relaunches the server the moment we stop it
@@ -1182,8 +1202,8 @@ service_install() { # ROOT NODE_BIN
         printf '    <key>KeepAlive</key>\n    <dict>\n        <key>SuccessfulExit</key>\n        <false/>\n    </dict>\n'
         printf '    <key>ThrottleInterval</key>\n    <integer>10</integer>\n'
         printf '    <key>ExitTimeOut</key>\n    <integer>30</integer>\n'
-        printf '    <key>StandardOutPath</key>\n    <string>%s/server.log</string>\n' "$logs"
-        printf '    <key>StandardErrorPath</key>\n    <string>%s/server.log</string>\n' "$logs"
+        printf '    <key>StandardOutPath</key>\n    <string>%s/server.log</string>\n' "$(_xml_escape "$logs")"
+        printf '    <key>StandardErrorPath</key>\n    <string>%s/server.log</string>\n' "$(_xml_escape "$logs")"
         printf '</dict>\n</plist>\n'
       } > "$plist" || { err "could not write $plist — is it writable, and is there room on the disk?"; return 1; }
       log "wrote $plist"

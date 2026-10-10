@@ -846,7 +846,7 @@ test('service_install renders the systemd unit with an absolute node, PATH, logs
   const unitPath = join(home, '.config', 'systemd', 'user', 'irises.service');
   assert.equal(r.out.trim(), unitPath, 'callers capture this — the "wrote" line must be on stderr');
   const unit = readFileSync(unitPath, 'utf8');
-  assert.match(unit, /^ExecStart=\/usr\/local\/bin\/node .*\/clone\/dist\/index\.js$/m, 'a bare `node` never resolves in a unit');
+  assert.match(unit, /^ExecStart="\/usr\/local\/bin\/node" ".*\/clone\/dist\/index\.js"$/m, 'a bare `node` never resolves in a unit, and an unquoted path splits at its spaces');
   assert.match(unit, new RegExp(`^WorkingDirectory=${root}$`, 'm'));
   assert.match(unit, new RegExp(`^Environment="IRISES_HOME=${state}"$`, 'm'));
   assert.match(unit, /^Environment="NODE_OPTIONS=--max-old-space-size=512"$/m, 'app.env sets it too late for V8 — the unit is the only place it works');
@@ -861,6 +861,31 @@ test('service_install renders the systemd unit with an absolute node, PATH, logs
   assert.ok(r.log.some(l => l === 'systemctl argv:--user daemon-reload'), r.log.join('\n'));
   assert.ok(r.log.some(l => l === 'systemctl argv:--user enable irises'), r.log.join('\n'));
   assert.ok(r.log.some(l => l.startsWith('loginctl argv:enable-linger')), 'without linger the unit dies at logout');
+});
+
+test('service_install quotes the systemd ExecStart, so a path with a space or a % still starts', () => {
+  // systemd splits ExecStart on whitespace: unquoted, `/home/alice/My Projects/Irises/dist/index.js`
+  // became TWO arguments (node was handed `/home/alice/My`), so the service never came up on exactly
+  // the clones whose path has a space in it. `%` is a specifier to systemd and doubles in every value,
+  // quoted or not — hence `%%` in the assertions below.
+  const dir = mkdtempSync(join(tmpdir(), 'irises-svc-'));
+  const home = join(dir, 'home');
+  const root = join(dir, 'My Projects', '50%off');
+  const state = join(dir, 'state');
+  mkdirSync(join(root, 'dist'), { recursive: true });
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(root, '.env'), 'PORT=3000\nNODE_OPTIONS=--max-old-space-size=50%   # odd but legal\n');
+  const r = runLib(`service_install ${JSON.stringify(root)} /usr/local/bin/node`, {
+    stubs: { systemctl: 'exit 0', uname: 'echo Linux', loginctl: 'exit 0' },
+    env: { HOME: home, IRISES_HOME: state, IRISES_ROOT: root, XDG_RUNTIME_DIR: dir, DBUS_SESSION_BUS_ADDRESS: 'unix:path=/dev/null' },
+  });
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+  const unit = readFileSync(join(home, '.config', 'systemd', 'user', 'irises.service'), 'utf8');
+  assert.match(unit, /^ExecStart="\/usr\/local\/bin\/node" ".*My Projects\/50%%off\/dist\/index\.js"$/m,
+    'both arguments are quoted, and the % is doubled');
+  assert.match(unit, /^WorkingDirectory=.*My Projects\/50%%off$/m,
+    'WorkingDirectory takes the rest of the line, so it is escaped but NOT quoted');
+  assert.match(unit, /^Environment="NODE_OPTIONS=--max-old-space-size=50%%"$/m, 'Environment values double % too');
 });
 
 test('service_install renders the LaunchAgent plist that stays stopped after a clean stop', () => {
@@ -888,6 +913,35 @@ test('service_install renders the LaunchAgent plist that stays stopped after a c
   assert.match(plist, /<key>ThrottleInterval<\/key>\s*<integer>10<\/integer>/);
   assert.match(plist, new RegExp(`<key>StandardOutPath</key>\\s*<string>${state}/logs/server.log</string>`));
   assert.ok(r.log.some(l => /^launchctl argv:bootstrap gui\/\d+ .*ai\.irises\.server\.plist$/.test(l)), r.log.join('\n'));
+});
+
+test('service_install escapes the LaunchAgent plist, so a path with & or < stays valid XML', () => {
+  // A macOS clone can legally sit under `/Users/me/Irises & Co/<x>`. Printed raw, the `&` makes the
+  // plist unparseable ("unknown ampersand-escape sequence") and `launchctl bootstrap` refuses it, so
+  // the install fails on a path the filesystem is perfectly happy with. `_xml_escape` already existed
+  // for the Windows task definition; this branch simply was not calling it.
+  const dir = mkdtempSync(join(tmpdir(), 'irises-svc-'));
+  const home = join(dir, 'home');
+  const root = join(dir, 'Irises & Co', '<x>');
+  const state = join(dir, 'state');
+  mkdirSync(join(root, 'dist'), { recursive: true });
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(root, '.env'), 'PORT=3000\n');
+  const r = runLib(`service_install ${JSON.stringify(root)} /opt/homebrew/bin/node`, {
+    stubs: { launchctl: 'exit 0', uname: 'echo Darwin' },
+    env: { HOME: home, IRISES_HOME: state, IRISES_ROOT: root },
+  });
+  assert.equal(r.code, 0, `${r.out}\n${r.err}`);
+  const plistPath = join(home, 'Library', 'LaunchAgents', 'ai.irises.server.plist');
+  const plist = readFileSync(plistPath, 'utf8');
+  assert.ok(plist.includes('Irises &amp; Co'), 'the ampersand is escaped');
+  assert.ok(plist.includes('&lt;x&gt;'), 'the angle brackets are escaped');
+  assert.ok(!/Irises & Co/.test(plist), 'no RAW ampersand survives into the XML');
+  // The real oracle, when it is available: launchd itself uses this parser.
+  if (process.platform === 'darwin') {
+    const lint = spawnSync('plutil', ['-lint', plistPath], { encoding: 'utf8' });
+    assert.equal(lint.status, 0, `plutil -lint rejected the plist: ${lint.stdout}${lint.stderr}`);
+  }
 });
 
 test('service_restart and service_uninstall use the right verbs per platform', () => {
