@@ -13,6 +13,9 @@ Environment (set for the gateway process):
     IRISES_BRIDGE_FAIL   open (default: on bridge error hermes answers itself) | closed
     IRISES_BRIDGE_WORKERS  forward worker threads / queue shards (default 2). Each chat is
                          pinned to one shard, so a chat's messages stay in order.
+    IRISES_BRIDGE_REVIVE on (default) | off. On gateway start, if a local Irises does not answer
+                         /health, start its installed service (launchd/systemd) — so a
+                         `hermes gateway restart` also brings back an Irises that was stopped.
 
 How it works (verified against hermes source):
   * `pre_gateway_dispatch` fires for every non-internal inbound message on EVERY platform,
@@ -37,9 +40,11 @@ import logging
 import os
 import queue
 import re
+import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -760,9 +765,92 @@ def on_inbound(event=None, gateway=None, session_store=None, **_kwargs):
         return {"action": "skip", "reason": "irises-bridge-error"} if fail_closed else None
 
 
+# ── revive on gateway start ───────────────────────────────────────────────────
+# The Irises service only restarts itself after a CRASH. A clean stop — a stray `pkill`, a script that
+# stops it by pid — leaves it down with nothing to bring it back, and fail-open quietly hands every
+# fronted chat to hermes. `hermes gateway restart` is the command people reach for when that happens,
+# and it reloads this plugin, so this is where Irises gets brought back too.
+
+_LAUNCHD_LABEL = "ai.irises.server"
+_SYSTEMD_UNIT = "irises"
+_REVIVE_WAIT_S = 30.0
+
+
+def _is_loopback_url(url: str) -> bool:
+    """Only a local Irises can be started from here; a remote one is someone else's to run."""
+    try:
+        host = urllib.parse.urlsplit(url.strip()).hostname or ""
+    except ValueError:
+        return False
+    return host.lower() in ("127.0.0.1", "localhost", "::1")
+
+
+def _revive_commands(sysname: str, uid: int, home: str, url: str, opt: str) -> "list[list[str]]":
+    """The commands that start the installed Irises service, tried in order until one works.
+    Empty = leave it alone (opted out, remote Irises, or no service installed here). Every command
+    is a no-op on a server that is already running, so a race with another starter is harmless."""
+    if opt.strip().lower() in ("0", "off", "false", "no") or not _is_loopback_url(url):
+        return []
+    if sysname == "Darwin":
+        plist = os.path.join(home, "Library", "LaunchAgents", f"{_LAUNCHD_LABEL}.plist")
+        if not os.path.isfile(plist):
+            return []
+        # kickstart (no -k) starts a loaded job and never restarts a running one; bootstrap covers a
+        # job that was booted out entirely (its RunAtLoad starts it).
+        return [["launchctl", "kickstart", f"gui/{uid}/{_LAUNCHD_LABEL}"],
+                ["launchctl", "bootstrap", f"gui/{uid}", plist]]
+    if sysname == "Linux":
+        unit = os.path.join(home, ".config", "systemd", "user", f"{_SYSTEMD_UNIT}.service")
+        if not os.path.isfile(unit):
+            return []
+        return [["systemctl", "--user", "start", _SYSTEMD_UNIT]]
+    return []
+
+
+def _health_ok(base: str, timeout: float = 3.0) -> bool:
+    try:
+        with urllib.request.urlopen(f"{base}/health", timeout=timeout) as res:
+            res.read()
+            return 200 <= getattr(res, "status", 200) < 300
+    except Exception:  # noqa: BLE001 — any failure is "not up"
+        return False
+
+
+def _revive_irises() -> None:
+    """Runs once per gateway start, off the gateway's loop. Starts Irises only if it is not answering."""
+    base = _cfg("IRISES_URL", "http://127.0.0.1:3000").rstrip("/")
+    if not _patterns() or _health_ok(base):
+        return
+    cmds = _revive_commands(os.uname().sysname, os.getuid(), os.path.expanduser("~"),
+                            base, _cfg("IRISES_BRIDGE_REVIVE", "on"))
+    if not cmds:
+        log.warning("irises-bridge: Irises is not answering %s/health and there is no local service "
+                    "to start — fronted chats go to hermes until it is back", base)
+        return
+    for cmd in cmds:
+        try:
+            rc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15).returncode
+        except Exception as exc:  # noqa: BLE001
+            log.warning("irises-bridge: %s failed to run: %s", " ".join(cmd[:2]), exc)
+            continue
+        if rc == 0:
+            break
+    deadline = time.monotonic() + _REVIVE_WAIT_S
+    while time.monotonic() < deadline:
+        if _health_ok(base):
+            _HEALTH.note_ok()
+            log.info("irises-bridge: Irises was down at gateway start — started it (%s), healthy again",
+                     " ".join(cmd[:2]))
+            return
+        time.sleep(1.0)
+    log.warning("irises-bridge: Irises was down at gateway start and did not come back within %ds "
+                "after %s — check ~/.irises/logs/server.log", int(_REVIVE_WAIT_S), " ".join(cmd[:2]))
+
+
 def register(ctx) -> None:
     ctx.register_hook("pre_gateway_dispatch", on_inbound)
     if not _WATCHING.is_set():
         _WATCHING.set()
         threading.Thread(target=_gateway_watch, name="irises-bridge-gateway-watch", daemon=True).start()
+        threading.Thread(target=_revive_irises, name="irises-bridge-revive", daemon=True).start()
     log.info("irises-bridge registered (front: %s)", ", ".join(_patterns()) or "<nothing — set IRISES_FRONT>")

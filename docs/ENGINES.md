@@ -487,6 +487,7 @@ can still be lost (it is logged at ERROR), and everything after it goes to herme
 | `IRISES_BRIDGE_FAIL` | `open` | `open` = engine answers on bridge failure; `closed` = silence |
 | `IRISES_BRIDGE_PORT` | `8655` | hermes only: loopback listener for Irises's outbound sends |
 | `IRISES_BRIDGE_WORKERS` | `2` | hermes only: forward workers / queue shards (a chat is pinned to one, so its messages stay ordered) |
+| `IRISES_BRIDGE_REVIVE` | `on` | hermes only: when the gateway starts and a loopback `IRISES_URL` does not answer `/health`, start the installed Irises service (`launchctl kickstart`, else `bootstrap`; `systemctl --user start irises`). The service restarts itself only after a crash, so a clean stop (a stray `pkill`) used to leave Irises down; now `hermes gateway restart` brings it back. Never restarts a running Irises. `off` disables |
 | `HERMES_GATEWAY_BUSY_ACK_ENABLED` | `true` | hermes's OWN var (set in `~/.hermes/.env`): `false` silences the "⚡ Interrupting current task" / queued / steered busy acks globally. Recommended `false` for fronted chats, which do their own batching |
 
 `BRIDGE_TYPING` is set on the **Irises** side (not the gateway): `off` by default; `on` forwards a

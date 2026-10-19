@@ -15,5 +15,6 @@ optional_env:
   - IRISES_BRIDGE_PORT     # loopback listener for Irises's outbound sends (default 8655)
   - IRISES_BRIDGE_FAIL     # open (default) | closed
   - IRISES_BRIDGE_WORKERS  # forward worker threads / queue shards (default 2, max 16)
+  - IRISES_BRIDGE_REVIVE   # on (default) | off: start a stopped local Irises service at gateway start
 provides_hooks:
   - pre_gateway_dispatch

@@ -589,5 +589,76 @@ class ToEpoch(unittest.TestCase):
         self.assertIsNone(bridge._to_epoch("not a time"))
 
 
+class Revive(unittest.TestCase):
+    """A clean stop (stray pkill) leaves the Irises service down — launchd/systemd only restart a crash.
+    The gateway start is where it gets brought back, so `hermes gateway restart` fixes it."""
+
+    def setUp(self):
+        import tempfile, os as _os
+        self.home = tempfile.mkdtemp()
+        _os.makedirs(_os.path.join(self.home, "Library", "LaunchAgents"))
+        _os.makedirs(_os.path.join(self.home, ".config", "systemd", "user"))
+        self.os = _os
+
+    def _touch(self, *parts):
+        open(self.os.path.join(self.home, *parts), "w").close()
+
+    def test_loopback_only(self):
+        for url in ("http://127.0.0.1:3000", "http://localhost:3000", "http://[::1]:3000"):
+            self.assertTrue(bridge._is_loopback_url(url), url)
+        for url in ("http://10.0.0.5:3000", "https://irises.example.com", "http://127.0.0.1.evil.com", ""):
+            self.assertFalse(bridge._is_loopback_url(url), url)
+
+    def test_macos_starts_the_launchd_job_without_restarting_a_live_one(self):
+        self._touch("Library", "LaunchAgents", "ai.irises.server.plist")
+        cmds = bridge._revive_commands("Darwin", 501, self.home, "http://127.0.0.1:3000", "on")
+        self.assertEqual(cmds[0], ["launchctl", "kickstart", "gui/501/ai.irises.server"])
+        self.assertNotIn("-k", cmds[0], "-k would kill a running Irises")
+        self.assertEqual(cmds[1][:3], ["launchctl", "bootstrap", "gui/501"])
+
+    def test_linux_starts_the_user_unit(self):
+        self._touch(".config", "systemd", "user", "irises.service")
+        self.assertEqual(bridge._revive_commands("Linux", 1000, self.home, "http://127.0.0.1:3000", "on"),
+                         [["systemctl", "--user", "start", "irises"]])
+
+    def test_nothing_to_start_is_left_alone(self):
+        self.assertEqual(bridge._revive_commands("Darwin", 501, self.home, "http://127.0.0.1:3000", "on"), [])
+        self._touch("Library", "LaunchAgents", "ai.irises.server.plist")
+        self.assertEqual(bridge._revive_commands("Darwin", 501, self.home, "http://10.0.0.5:3000", "on"), [])
+        for off in ("off", "0", "false", "no"):
+            self.assertEqual(bridge._revive_commands("Darwin", 501, self.home, "http://127.0.0.1:3000", off), [])
+        self.assertEqual(bridge._revive_commands("Windows", 0, self.home, "http://127.0.0.1:3000", "on"), [])
+
+    def test_a_healthy_irises_is_never_touched(self):
+        with mock.patch.dict("os.environ", {"IRISES_FRONT": "*:*"}), \
+             mock.patch.object(bridge, "_health_ok", return_value=True), \
+             mock.patch.object(bridge.subprocess, "run") as run:
+            bridge._revive_irises()
+        run.assert_not_called()
+
+    def test_a_down_irises_is_started_and_marked_healthy(self):
+        self._touch("Library", "LaunchAgents", "ai.irises.server.plist")
+        health = iter([False, False, True])
+        with mock.patch.dict("os.environ", {"IRISES_FRONT": "*:*", "IRISES_URL": "http://127.0.0.1:3000"}), \
+             mock.patch.object(bridge, "_health_ok", side_effect=lambda *_a, **_k: next(health)), \
+             mock.patch.object(bridge.os, "uname", return_value=types.SimpleNamespace(sysname="Darwin")), \
+             mock.patch.object(bridge.os.path, "expanduser", return_value=self.home), \
+             mock.patch.object(bridge.time, "sleep"), \
+             mock.patch.object(bridge, "_HEALTH") as health_state, \
+             mock.patch.object(bridge.subprocess, "run", return_value=mock.Mock(returncode=0)) as run:
+            bridge._revive_irises()
+        self.assertEqual(run.call_args_list[0].args[0][:2], ["launchctl", "kickstart"])
+        self.assertEqual(run.call_count, 1, "kickstart worked, so bootstrap is not tried")
+        health_state.note_ok.assert_called_once()
+
+    def test_front_nothing_means_do_nothing(self):
+        with mock.patch.dict("os.environ", {"IRISES_FRONT": ""}), \
+             mock.patch.object(bridge, "_health_ok") as probe, \
+             mock.patch.object(bridge.subprocess, "run") as run:
+            bridge._revive_irises()
+        probe.assert_not_called()
+        run.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
