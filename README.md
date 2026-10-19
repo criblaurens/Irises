@@ -4,16 +4,8 @@
   <img src="docs/assets/irises-logo.png" alt="Irises" width="340">
 </a>
 
-<br>
-
 <b>The personality layer for your AI agent.</b><br>
 Irises texts like a person and hands the heavy work to hermes.
-
-<br>
-
-<h3><a href="https://irises.criblaurens.com">→ Try the live demo at irises.criblaurens.com</a></h3>
-<sub>Send it a message. No install, no API key, no sign-up. Thirty seconds will tell you more than this README.</sub>
-
 
 <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/license-MIT-000000?style=flat-square"></a>
 <a href="https://nodejs.org/"><img alt="Node 22" src="https://img.shields.io/badge/node-%E2%89%A5%2022.13-000000?style=flat-square&logo=node.js&logoColor=white"></a>
@@ -29,6 +21,9 @@ Irises texts like a person and hands the heavy work to hermes.
 <a href="#documentation">Docs</a>
 
 </div>
+
+> [!TIP]
+> **See it before you install it.** Chat with Irises live at **[irises.criblaurens.com](https://irises.criblaurens.com)**. Send it a message and watch it reply the way a person texts. Nothing to install, no API key, no sign-up.
 
 <br>
 
