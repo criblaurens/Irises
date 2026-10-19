@@ -331,18 +331,16 @@ tail -f "${IRISES_HOME:-$HOME/.irises}/logs/server.log"
 curl -s http://127.0.0.1:3000/health
 ```
 
-### Chats answered by plain hermes?
-
-Your fronted chats get plain-hermes replies instead of Irises: she has stopped. The bridge lets hermes answer rather than leave you in silence.
-
-She restarts herself after a **crash**, but not after a normal stop — a `kill <pid>`, or a script's `pkill -f dist/index.js`, which also matches the real Irises. So start her again, either way:
+### Restart
 
 ```bash
-hermes gateway restart   # brings Irises back too
+hermes gateway restart                                      # reloads the gateway and starts Irises if she is down
+launchctl kickstart -k gui/$(id -u)/ai.irises.server        # macOS
+systemctl --user restart irises                             # Linux
+schtasks /Run /TN Irises                                    # Windows
 ```
-or the restart command for your platform in [Start, stop, logs](#start-stop-logs) above.
 
-Then wait for `curl -s http://127.0.0.1:3000/health` to answer again. Nothing back after that? `tail -n 40 ~/.irises/logs/server.log` says why — `EADDRINUSE` means another process holds the port.
+The commands do the same job. Use `hermes gateway restart` when the gateway also needs reloading; use the platform command to leave the gateway alone.
 
 ### Uninstall
 
@@ -425,6 +423,25 @@ By default Irises speaks on your engine's model. At boot she reads the model, th
 There are three lanes, which are `anthropic`, `openrouter` and `openai`. The `openai` lane talks to any OpenAI-compatible endpoint through `OPENAI_BASE_URL`. You can override any role with `<ROLE>_PROVIDER` and `<ROLE>_MODEL`. Set `ENGINE_MODEL_INHERIT=off` to stop the inheritance. The live model map shows in `/health` and on the dashboard.
 
 With no engine, Irises uses her own shipped models. OpenRouter is the primary lane for Convo, Classify and Fallfirm, and Anthropic is the fallback. Voice memos use an audio model.
+
+## Troubleshooting
+
+### Chats answered by plain hermes?
+
+Your fronted chats get plain-hermes replies instead of Irises: she has stopped. The bridge lets hermes answer rather than leave you in silence.
+
+She restarts herself after a **crash**, but not after a normal stop — a `kill <pid>`, or a script's `pkill -f dist/index.js`, which also matches the real Irises. So start her again, either way:
+
+```bash
+hermes gateway restart   # brings Irises back too
+```
+or the restart command for your platform in [Restart](#restart) above.
+
+Then wait for `curl -s http://127.0.0.1:3000/health` to answer again. Still nothing? Read `tail -n 40 ~/.irises/logs/server.log`, and see the next entry.
+
+### Nothing answers on port 3000
+
+Something else holds the port. `lsof -nP -iTCP:3000 -sTCP:LISTEN` names the process; on macOS `EADDRINUSE` appears in `server.log` at boot.
 
 ## HTTP API
 
