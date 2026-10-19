@@ -8,7 +8,6 @@
 Irises texts like a person and hands the heavy work to hermes.
 
 <a href="https://irises.criblaurens.com"><b>Try the live demo at irises.criblaurens.com →</b></a><br>
-<sub>Send it a message and watch it text back like a person. No install, no API key, no sign-up.</sub>
 
 <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/license-MIT-000000?style=flat-square"></a>
 <a href="https://nodejs.org/"><img alt="Node 22" src="https://img.shields.io/badge/node-%E2%89%A5%2022.13-000000?style=flat-square&logo=node.js&logoColor=white"></a>
