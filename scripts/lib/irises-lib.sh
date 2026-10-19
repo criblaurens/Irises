@@ -657,6 +657,8 @@ openclaw_home() {
 
 # Which engine this clone talks to: an explicit override, else OPS_BACKEND from the clone's .env
 # (then app.env, then the shell), else whatever is actually installed. `off` = standalone.
+# shellcheck disable=SC2120  # the override IS passed — engine-setup.sh calls `engine_kind
+# "$ENGINE_FLAG"` — but shellcheck judges this file alone, and the one call inside it passes none.
 engine_kind() { # [OVERRIDE]
   local override="${1:-}" root v
   case "$override" in
