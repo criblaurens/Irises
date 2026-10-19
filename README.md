@@ -331,35 +331,18 @@ tail -f "${IRISES_HOME:-$HOME/.irises}/logs/server.log"
 curl -s http://127.0.0.1:3000/health
 ```
 
-### If Irises was killed (chats are answered by plain hermes)
+### Chats answered by plain hermes?
 
-When your Telegram (or any fronted) chat suddenly gets replies from plain hermes instead of Irises, Irises has almost always stopped. The bridge notices she is gone and lets hermes answer, so you get a reply instead of silence.
+Your fronted chats get plain-hermes replies instead of Irises: she has stopped. The bridge lets hermes answer rather than leave you in silence.
 
-The service brings Irises back on its own only after a **crash**. A normal stop does not count as a crash. So `kill <pid>`, `pkill -f dist/index.js` (a common cleanup line in scripts and coding agents), or `launchctl kill` leaves her down until something starts her again.
+She restarts herself after a **crash**, but not after a normal stop — a `kill <pid>`, or a script's `pkill -f dist/index.js`, which also matches the real Irises. So start her again, either way:
 
-1. Check that she is down.
-   ```bash
-   curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/health   # anything but 200 = down
-   launchctl print gui/$(id -u)/ai.irises.server | grep -E 'state =|last exit'   # macOS
-   systemctl --user status irises                                              # Linux
-   ```
-2. Start her again. Either command works.
-   ```bash
-   hermes gateway restart      # with hermes: the bridge starts Irises when the gateway comes up
-   ```
-   or restart the service directly, which leaves the gateway alone:
-   ```bash
-   launchctl kickstart -k gui/$(id -u)/ai.irises.server   # macOS
-   systemctl --user restart irises                         # Linux
-   schtasks /Run /TN Irises                                # Windows
-   ```
-3. Run the health check again and wait for `200`. Then send a message. Irises should answer within one probe interval (about 15 seconds).
+```bash
+hermes gateway restart   # brings Irises back too
+```
+or the restart command for your platform in [Start, stop, logs](#start-stop-logs) above.
 
-When the gateway starts, the bridge checks `/health`. If Irises does not answer, the bridge starts her installed service and logs `Irises was down at gateway start — started it`. It never restarts an Irises that is already running. It does nothing when `IRISES_URL` points at another machine. Set `IRISES_BRIDGE_REVIVE=off` in `~/.hermes/.env` to turn it off.
-
-If she does not come back, the reason is in `tail -n 40 ~/.irises/logs/server.log`. `EADDRINUSE` there means another process holds port 3000.
-
-To keep it from happening again, stop test servers by their own pid or port, never with `pkill -f dist/index.js`. That pattern also matches the real Irises.
+Then wait for `curl -s http://127.0.0.1:3000/health` to answer again. Nothing back after that? `tail -n 40 ~/.irises/logs/server.log` says why — `EADDRINUSE` means another process holds the port.
 
 ### Uninstall
 
