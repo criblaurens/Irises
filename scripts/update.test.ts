@@ -106,6 +106,14 @@ test('--check on this clone reports one of the two check results and exits 0 or 
   // nothing about the contract — so that case is SKIPPED, not failed. `npm test` has to pass on a
   // plane. Only a run that actually reached the remote is asserted.
   const r = run(['--check']);
+  // A detached HEAD is refused by update.sh's own preflight before it fetches anything, so the
+  // 0/10 split was never up for observation. actions/checkout@v4 leaves one on every PR build, and
+  // this is not the offline case below — skip it the same way, for the same reason: the contract was
+  // not exercised, so there is nothing to assert.
+  if (r.code === 1 && /detached HEAD/.test(r.err)) {
+    t.skip('detached HEAD: --check refuses to compare an unattached tree');
+    return;
+  }
   if (r.code === 1 && /fetch|Could not resolve|unable to access|Network/i.test(r.err)) {
     t.skip('offline: --check needs the remote');
     return;

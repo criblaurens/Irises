@@ -27,7 +27,7 @@ import {
   setArchiveEmbedder, archiveEmbedder, backfillArchiveEmbeddings, encodeVector, l2Normalize,
   type Embedder,
 } from './memoryArchiveVectors.js';
-import { stmt } from '../sqlite.js';
+import { stmt, ftsAvailable } from '../sqlite.js';
 
 let seq = 0;
 function freshHandle(): string {
@@ -96,8 +96,13 @@ async function archive(entries: ArchiveInput[]): Promise<void> {
   if (archiveEmbedder()) await backfillArchiveEmbeddings({ batchSize: 50, maxBatches: 4 });
 }
 
-test('this build has fts5 (the LIKE path is a fallback, not the norm)', () => {
-  assert.equal(archiveSearchBackend(), 'fts5');
+// Node 22.x — the engines floor and the low end of the CI matrix — bundles a SQLite amalgamation
+// without fts5, so demanding the virtual table would fail on a Node this package supports. The
+// invariant that holds everywhere is that the backend is never ambiguous: fts5 when the build
+// compiles it in, the documented LIKE fallback when it does not, nothing else. The forced-LIKE
+// cases below prove that fallback answers the same queries the same way.
+test('archive search uses fts5 when the build compiles it in, and says so when it does not', () => {
+  assert.equal(archiveSearchBackend(), ftsAvailable() ? 'fts5' : 'like');
 });
 
 for (const backend of BACKENDS) {

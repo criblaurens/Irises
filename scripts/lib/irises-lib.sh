@@ -1032,12 +1032,14 @@ service_task_xml_path() { printf '%s/irises-task.xml' "$(irises_home)"; }
 
 # The three characters that cannot appear raw in XML character data. A Windows path can legally hold
 # an `&` (C:\Users\R&D\…), which would otherwise make the task definition unparseable.
+#
+# sed, not `${s//</&lt;}`: bash 5.2 enabled `patsub_replacement` by default, so an unquoted `&` in a
+# substitution's replacement means "the text that matched". On Ubuntu's bash the `&` in `&lt;`
+# therefore expanded back to `<` and `/Users/me/Irises & Co/<x>` came out `<lt;x>gt;` — a plist
+# launchctl rejects — while macOS's bash 3.2 (which has no such feature) escaped it correctly. The
+# `\&` spelling is a literal ampersand in every sed, so the output is the same on both.
 _xml_escape() { # TEXT
-  local s="${1:-}"
-  s="${s//&/&amp;}"
-  s="${s//</&lt;}"
-  s="${s//>/&gt;}"
-  printf '%s' "$s"
+  printf '%s' "${1:-}" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
 }
 
 # One systemd unit ARGUMENT, ready to paste after `ExecStart=`. systemd splits that line on
