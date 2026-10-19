@@ -11,8 +11,18 @@ Irises texts like a person and hands the heavy work to hermes.
 
 <br>
 
-<a href="https://irises.criblaurens.com"><b>→ Try the live demo at irises.criblaurens.com</b></a><br>
-<sub>Send it a message. No install, no API key, no sign-up. Thirty seconds will tell you more than this README.</sub>
+<br>
+
+<a href="https://irises.criblaurens.com">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/cta-demo-dark.svg">
+    <img src="docs/assets/cta-demo-light.svg" alt="Try the live demo at irises.criblaurens.com" width="360">
+  </picture>
+</a>
+
+<sub><b>Live now</b> at <a href="https://irises.criblaurens.com">irises.criblaurens.com</a> &nbsp;·&nbsp; No install &nbsp;·&nbsp; No API key &nbsp;·&nbsp; 30 seconds</sub>
+
+<br>
 
 
 <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/license-MIT-000000?style=flat-square"></a>
