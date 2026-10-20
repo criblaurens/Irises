@@ -5,7 +5,7 @@
 </a>
 
 <b>The personality layer for your AI agent.</b><br>
-Irises texts like a person and hands the heavy work to hermes.
+Irises makes your AI agent text like a human and hands the heavy work to hermes.
 
 <a href="https://irises.criblaurens.com"><b>Try the live demo at irises.criblaurens.com →</b></a><br>
 
@@ -20,6 +20,7 @@ Irises texts like a person and hands the heavy work to hermes.
 <a href="#the-meta-prompt">The meta-prompt</a> &nbsp;·&nbsp;
 <a href="#install">Install</a> &nbsp;·&nbsp;
 <a href="#configuration">Configuration</a> &nbsp;·&nbsp;
+<a href="#faq">FAQ</a> &nbsp;·&nbsp;
 <a href="#documentation">Docs</a>
 
 </div>
@@ -27,6 +28,8 @@ Irises texts like a person and hands the heavy work to hermes.
 <br>
 
 ## What Irises is
+
+**Irises is an open-source (MIT) personality layer that makes an AI agent text like a human.** It is a self-hosted TypeScript server that sits in front of [hermes-agent](https://github.com/NousResearch/hermes-agent) and gives it one consistent voice, a layered memory of you, a hidden mood and a real texting rhythm on Telegram, WhatsApp, Signal and Discord. Irises answers in short chat bubbles and hands research, mail and scheduled jobs to the agent through a structured [meta-prompt](#the-meta-prompt). It runs on Node 22.13 or later, needs no database and no API key of its own, and installs with one command. You can talk to her in the browser at **[irises.criblaurens.com](https://irises.criblaurens.com)**.
 
 Agent frameworks such as [hermes-agent](https://github.com/NousResearch/hermes-agent) and [OpenClaw](https://github.com/openclaw/openclaw) are very good at deep work. They can research a topic, read your files and your mail, and run scheduled jobs. Their replies read like a report. Nobody texts like that.
 
@@ -456,6 +459,46 @@ Something else holds the port. `lsof -nP -iTCP:3000 -sTCP:LISTEN` names the proc
 ## Deployment
 
 Irises ships as one Docker image that serves the server and the static web client together. It runs on any small VM behind **Caddy**, which provides automatic HTTPS. Deploys are manual. You build the image, push it and run `docker compose up`. The runbook is [docs/DEPLOY.md](docs/DEPLOY.md).
+
+## FAQ
+
+### How do I make my AI agent text like a human?
+
+The usual reasons an agent sounds like a bot are the reply format and the pacing. It sends one long, report-style message and answers every text the moment it arrives, and nothing carries over between chats. Irises fixes these in code and leaves the agent alone. She splits each reply into short bubbles and paces them like typing. She merges texts that arrive together into one answer and keeps one personality text on every prompt. She keeps a [layered memory](#memory) of the person and a [hidden mood](#the-mood-and-personality-system) that changes how sharp and how short a reply is. The agent still does the real work, and the [Composer](#four-prompts-one-person) puts its answer back into her voice. To see the result before you install anything, text her at [irises.criblaurens.com](https://irises.criblaurens.com).
+
+### How is this different from a persona system prompt?
+
+A system prompt only changes the words, and it drifts as the context gets long. Irises keeps the persona text byte-identical on all four prompts, and code owns every number: the mood, the 28-day cycle, the relationship climate and the familiarity level from 1 to 100. The model reports one feeling word per turn. Code turns that word into at most four directives, so the mood cannot inflate because the model says so. The texting rhythm, the send lock, the consent gate and the memory tiers are code too, not prompt text.
+
+### How does it compare with other options?
+
+| | Persona system prompt | Plain hermes-agent | Memory layer such as Mem0 | **Irises** |
+|---|---|---|---|---|
+| Short bubbles, paced like typing | no | no | no | **yes** |
+| Texts that arrive together get one answer | no | no | no | **yes** |
+| One voice on every prompt, including tool results | partly | partly | no | **yes** |
+| Memory of the person | no | yes, the engine's own | yes, the core feature | **yes, four tiers plus a weekly thesis** |
+| Hidden mood that code owns | no | no | no | **yes** |
+| Asks before the agent sends, deletes, books or posts | no | per-command approvals | no | **yes, in plain chat** |
+| Research, files, mail and cron | no | yes | no | **yes, through the engine** |
+
+Irises is not a memory library and not an agent framework. It is the layer between the person and the agent you already run. [docs/MEMORY_ARCHITECTURES.md](docs/MEMORY_ARCHITECTURES.md) compares its memory design with vector (Mem0), graph (Zep) and episodic (MemGPT and Letta) memory.
+
+### Which agents does it work with?
+
+Irises is built and tested against [hermes-agent](https://github.com/NousResearch/hermes-agent). The [OpenClaw](https://github.com/openclaw/openclaw) adapter is written but untested against a live gateway. Without an engine, Irises still chats, and she says plainly that deep work is offline.
+
+### Does it need its own API key or database?
+
+No. Irises reuses the key and the model that your engine already has, and it stores everything in the SQLite build inside Node (`node:sqlite`) and in flat Markdown files under `~/.irises`. You can still set your own keys for Anthropic, OpenRouter or any OpenAI-compatible host. See [Models](#models).
+
+### Where is my data kept?
+
+Everything stays on the machine that runs Irises, in `IRISES_HOME`, which defaults to `~/.irises`. The memory tiers are plain Markdown files that you can read and edit. Irises never writes to the engine's storage. Uninstall keeps your data unless you pass `--purge-data`.
+
+### Can I try it without installing?
+
+Yes. The demo at [irises.criblaurens.com](https://irises.criblaurens.com) runs a smaller Irises in the browser and shows her mood, her note to self and the brief she would hand hermes. The demo has no engine connected, so tasks that need real work come back empty and she tells you so.
 
 ## Documentation
 

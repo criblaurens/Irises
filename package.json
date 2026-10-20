@@ -1,25 +1,39 @@
 {
   "name": "irises",
   "version": "1.0.0",
-  "description": "Irises — a private, deadpan do-anything companion with one read on you. A multi-agent brain that is the user-facing interface for the OpenClaw/Hermes engines, reachable over a web/CLI debug chat and the engine bridge.",
+  "description": "The personality layer for your AI agent: an open-source server that makes hermes-agent text like a human, with one voice, layered memory, a hidden mood and real texting rhythm on Telegram, WhatsApp, Signal and Discord.",
   "main": "dist/index.js",
   "license": "MIT",
   "engines": {
     "node": ">=22.13"
+  },
+  "homepage": "https://irises.criblaurens.com",
+  "bugs": {
+    "url": "https://github.com/criblaurens/Irises/issues"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/criblaurens/Irises.git"
   },
   "keywords": [
-    "assistant",
-    "ai",
-    "claude",
-    "anthropic",
-    "multi-agent",
-    "openclaw",
+    "ai-agent",
+    "personality-layer",
+    "ai-persona",
+    "ai-companion",
+    "human-like-chat",
+    "conversational-ai",
+    "hermes-agent",
     "hermes",
+    "openclaw",
+    "agent-memory",
+    "long-term-memory",
     "chatbot",
+    "telegram-bot",
+    "whatsapp-bot",
+    "self-hosted",
+    "llm",
+    "anthropic",
+    "openrouter",
     "typescript"
   ],
   "scripts": {
